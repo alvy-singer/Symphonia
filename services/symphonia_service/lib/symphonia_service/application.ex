@@ -13,7 +13,8 @@ defmodule SymphoniaService.Application do
         port ->
           [
             {SymphoniaService.HTTPServer,
-             port: String.to_integer(port), root: SymphoniaService.default_repositories_root()}
+             port: String.to_integer(port),
+             registry_path: SymphoniaService.default_registry_path()}
           ]
       end
 

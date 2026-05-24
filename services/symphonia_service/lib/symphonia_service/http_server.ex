@@ -5,7 +5,7 @@ defmodule SymphoniaService.HTTPServer do
 
   use GenServer
 
-  alias SymphoniaService.TaskStore
+  alias SymphoniaService.{RepositoryRegistry, TaskStore, Workspace}
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -14,27 +14,27 @@ defmodule SymphoniaService.HTTPServer do
   @impl true
   def init(opts) do
     port = Keyword.get(opts, :port, 4057)
-    root = Keyword.get(opts, :root, SymphoniaService.default_repositories_root())
+    registry_path = Keyword.get(opts, :registry_path, SymphoniaService.default_registry_path())
 
     {:ok, socket} =
       :gen_tcp.listen(port, [:binary, packet: :raw, active: false, reuseaddr: true])
 
     send(self(), :accept)
-    {:ok, %{socket: socket, root: root, port: port}}
+    {:ok, %{socket: socket, registry_path: registry_path, port: port}}
   end
 
   @impl true
   def handle_info(:accept, state) do
     {:ok, client} = :gen_tcp.accept(state.socket)
-    Task.start(fn -> serve(client, state.root) end)
+    Task.start(fn -> serve(client, state.registry_path) end)
     send(self(), :accept)
     {:noreply, state}
   end
 
-  defp serve(client, root) do
+  defp serve(client, registry_path) do
     with {:ok, raw} <- :gen_tcp.recv(client, 0, 5_000),
          {:ok, request} <- parse_request(raw) do
-      {status, payload} = route(request, root)
+      {status, payload} = route(request, registry_path)
       send_json(client, status, payload)
     else
       _ -> send_json(client, 400, %{"error" => "Bad request"})
@@ -59,19 +59,42 @@ defmodule SymphoniaService.HTTPServer do
     _ -> {:error, :invalid}
   end
 
-  defp route(%{method: "OPTIONS"}, _root), do: {204, %{}}
+  defp route(%{method: "OPTIONS"}, _registry_path), do: {204, %{}}
 
-  defp route(%{method: "GET", path: "/api/repositories"}, root) do
-    {200, %{"repositories" => TaskStore.list_repositories(root)}}
+  defp route(%{method: "GET", path: "/api/repositories"}, registry_path) do
+    repositories =
+      registry_path
+      |> RepositoryRegistry.list()
+      |> Enum.map(&public_repository/1)
+
+    {200, %{"repositories" => repositories}}
   end
 
-  defp route(%{method: "GET", path: path}, root) do
+  defp route(%{method: "POST", path: "/api/repositories", body: body}, registry_path) do
+    repository = registry_path |> RepositoryRegistry.add(decode_json(body)) |> public_repository()
+    {201, %{"repository" => repository}}
+  rescue
+    error -> {400, %{"error" => Exception.message(error)}}
+  end
+
+  defp route(%{method: "GET", path: path}, registry_path) do
     case path_parts(path) do
+      ["api", "repositories", repo, "workspace"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"repo" => repository["key"], "workspace" => Workspace.state(repository)}}
+
+      ["api", "repositories", repo, "workflow"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"repo" => repository["key"], "workflow" => Workspace.workflow(repository)}}
+
       ["api", "repositories", repo, "tasks"] ->
-        {200, %{"tasks" => public_tasks(TaskStore.list_tasks(root, repo))}}
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"tasks" => public_tasks(TaskStore.list_tasks(repository))}}
 
       ["api", "repositories", repo, "tasks", task_key] ->
-        case TaskStore.get_task(root, repo, task_key) do
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        case TaskStore.get_task(repository, task_key) do
           nil -> {404, %{"error" => "Task not found"}}
           task -> {200, %{"task" => public_task(task)}}
         end
@@ -79,13 +102,22 @@ defmodule SymphoniaService.HTTPServer do
       _ ->
         {404, %{"error" => "Not found"}}
     end
+  rescue
+    error -> {400, %{"error" => Exception.message(error)}}
   end
 
-  defp route(%{method: "PATCH", path: path, body: body}, root) do
+  defp route(%{method: "PATCH", path: path, body: body}, registry_path) do
     case path_parts(path) do
+      ["api", "repositories", repo, "workflow"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        payload = decode_json(body)
+        workflow = Workspace.update_workflow(repository, Map.get(payload, "body", ""))
+        {200, %{"repo" => repository["key"], "workflow" => workflow}}
+
       ["api", "repositories", repo, "tasks", task_key] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
         patch = decode_json(body)
-        task = TaskStore.patch_task(root, repo, task_key, patch)
+        task = TaskStore.patch_task(repository, task_key, patch)
         {200, %{"task" => public_task(task)}}
 
       _ ->
@@ -95,13 +127,34 @@ defmodule SymphoniaService.HTTPServer do
     error -> {400, %{"error" => Exception.message(error)}}
   end
 
-  defp route(%{method: "POST", path: path, body: body}, root) do
+  defp route(%{method: "POST", path: path, body: body}, registry_path) do
     case path_parts(path) do
+      ["api", "repositories", repo, "workspace", "initialize"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        workspace = Workspace.initialize(repository)
+        {200, %{"repo" => repository["key"], "workspace" => workspace}}
+
+      ["api", "repositories", repo, "workflow", "from-template"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        payload = decode_json(body)
+
+        template_id =
+          Map.get(payload, "template") || Map.get(payload, "templateId") || Map.get(payload, "id")
+
+        workflow = Workspace.create_workflow_from_template(repository, template_id)
+        {201, %{"repo" => repository["key"], "workflow" => workflow}}
+
+      ["api", "repositories", repo, "tasks"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        task = TaskStore.create_task(registry_path, repository, decode_json(body))
+        {201, %{"task" => public_task(task)}}
+
       ["api", "repositories", repo, "tasks", task_key, "events"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
         payload = decode_json(body)
         event = Map.fetch!(payload, "event")
         params = Map.get(payload, "params", %{})
-        task = TaskStore.apply_event(root, repo, task_key, event, params)
+        task = TaskStore.apply_event(repository, task_key, event, params)
         {200, %{"task" => public_task(task)}}
 
       _ ->
@@ -111,7 +164,7 @@ defmodule SymphoniaService.HTTPServer do
     error -> {400, %{"error" => Exception.message(error)}}
   end
 
-  defp route(_request, _root), do: {405, %{"error" => "Method not allowed"}}
+  defp route(_request, _registry_path), do: {405, %{"error" => "Method not allowed"}}
 
   defp path_parts(path) do
     path
@@ -141,6 +194,7 @@ defmodule SymphoniaService.HTTPServer do
   end
 
   defp reason(200), do: "OK"
+  defp reason(201), do: "Created"
   defp reason(204), do: "No Content"
   defp reason(400), do: "Bad Request"
   defp reason(404), do: "Not Found"
@@ -152,8 +206,19 @@ defmodule SymphoniaService.HTTPServer do
 
   defp public_tasks(tasks), do: Enum.map(tasks, &public_task/1)
 
+  defp public_repository(repository) do
+    workspace = Workspace.state(repository)
+    task_count = repository |> TaskStore.list_tasks() |> length()
+
+    repository
+    |> Map.merge(%{
+      "workspace" => workspace,
+      "taskCount" => task_count
+    })
+  end
+
   defp public_task(task) do
     task
-    |> Map.drop([:repositories_root, :file_path, :frontmatter, :body])
+    |> Map.drop([:repository, :file_path, :frontmatter, :body])
   end
 end

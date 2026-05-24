@@ -1,43 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, FileCode2, Sparkles } from "lucide-react";
-import { useDocs } from "@/lib/docs-store";
-import { useDraftHost } from "@/components/draft-host";
-import { MarkdownEditor } from "@/components/editor/markdown-editor";
+import { AlertTriangle, Check, FileCode2 } from "lucide-react";
+import type { WorkflowFile } from "@/lib/repository-model";
 import { cn } from "@/lib/utils";
-
-const TEMPLATES: Record<string, { label: string; desc: string; body: string }> = {
-  simple: {
-    label: "Simple PR",
-    desc: "Run → PR → human review.",
-    body:
-      "# WORKFLOW.md\n# Simple PR — assistant runs, opens a PR, human reviews on GitHub.\n\n" +
-      "on_task_started:\n  - assign: codex\n  - require_pr: true\n\n" +
-      "on_run_complete:\n  - status: in_review\n  - notify_assignees: true\n\n" +
-      "on_pr_merged:\n  - status: completed\n",
-  },
-  reviewFirst: {
-    label: "Review-first",
-    desc: "Review the run summary in Symphonía before any PR.",
-    body:
-      "# WORKFLOW.md\n# Review-first — humans review the run summary in Symphonía before any PR.\n\n" +
-      "on_task_started:\n  - assign: claude\n  - require_review: true\n\n" +
-      "on_run_complete:\n  - status: in_review\n  - request_review_from: assignees\n\n" +
-      "on_review_approved:\n  - open_pr: true\n\n" +
-      "on_pr_merged:\n  - status: completed\n",
-  },
-  retry: {
-    label: "Persistent retry",
-    desc: "Auto-retry on validation failure.",
-    body:
-      "# WORKFLOW.md\n# Persistent retry — re-run on validation failures up to 3 times.\n\n" +
-      "on_task_started:\n  - assign: cursor\n  - require_pr: true\n\n" +
-      "on_run_failed:\n  - retry:\n      max: 3\n      backoff: exponential\n\n" +
-      "on_run_complete:\n  - validate:\n      - tests\n      - typecheck\n      - lint\n\n" +
-      "on_pr_merged:\n  - status: completed\n",
-  },
-};
 
 interface ValidationError {
   line: number;
@@ -72,84 +38,151 @@ function validate(text: string): ValidationError[] {
     }
   });
 
-  for (const h of hooks) {
-    if (!seen.has(h)) {
-      errors.push({ line: 1, message: `Missing required hook "${h}:"` });
+  for (const hook of hooks) {
+    if (!seen.has(hook)) {
+      errors.push({ line: 1, message: `Missing required hook "${hook}:"` });
     }
   }
   return errors;
 }
 
 export function WorkflowView({ repoKey }: { repoKey: string }) {
-  const { ensureWorkflow, updatePage, byPath } = useDocs();
-  const { startDraft } = useDraftHost();
-  const [pageId, setPageId] = useState<string | null>(null);
+  const [workflow, setWorkflow] = useState<WorkflowFile | null>(null);
+  const [body, setBody] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Resolve (or create) the WORKFLOW.md page once the store is hydrated.
   useEffect(() => {
-    const existing = byPath(repoKey, "WORKFLOW.md");
-    if (existing) {
-      setPageId(existing.id);
-    } else {
-      const created = ensureWorkflow(repoKey);
-      setPageId(created.id);
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/repositories/${encodeURIComponent(repoKey)}/workflow`, {
+      cache: "no-store",
+    })
+      .then(async (res) => {
+        const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
+        if (!res.ok || !payload.workflow) throw new Error(payload.error ?? "Could not load WORKFLOW.md");
+        return payload.workflow;
+      })
+      .then((next) => {
+        if (cancelled) return;
+        setWorkflow(next);
+        setBody(next.body);
+        setDirty(false);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load WORKFLOW.md");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repoKey]);
+
+  const errors = useMemo(() => validate(body), [body]);
+
+  const createFromTemplate = async (template: string) => {
+    setPending(template);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/repositories/${encodeURIComponent(repoKey)}/workflow/from-template`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ template }),
+        },
+      );
+      const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
+      if (!res.ok || !payload.workflow) {
+        throw new Error(payload.error ?? "Could not create WORKFLOW.md");
+      }
+      setWorkflow(payload.workflow);
+      setBody(payload.workflow.body);
+      setDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create WORKFLOW.md");
+    } finally {
+      setPending(null);
     }
-  }, [repoKey, ensureWorkflow, byPath]);
+  };
 
-  const page = pageId ? byPath(repoKey, "WORKFLOW.md") : undefined;
-  const errors = useMemo(() => (page ? validate(page.body) : []), [page]);
+  const save = async () => {
+    setPending("save");
+    setError(null);
+    try {
+      const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/workflow`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
+      if (!res.ok || !payload.workflow) throw new Error(payload.error ?? "Could not save WORKFLOW.md");
+      setWorkflow(payload.workflow);
+      setBody(payload.workflow.body);
+      setDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save WORKFLOW.md");
+    } finally {
+      setPending(null);
+    }
+  };
 
-  if (!page) {
+  if (loading) {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
-        Loading WORKFLOW.md…
+        Loading WORKFLOW.md...
       </div>
     );
   }
 
-  // The "no body yet" empty state offers templates instead of a blank canvas.
-  if (!page.body.trim()) {
+  if (!workflow) {
+    return (
+      <div className="grid h-full place-items-center text-sm text-muted-foreground">
+        {error}
+      </div>
+    );
+  }
+
+  if (!workflow.exists) {
     return (
       <div className="flex h-full flex-col">
         <header className="border-b px-4 py-2.5 text-sm">
           <span className="font-semibold">Workflow</span>{" "}
-          <span className="text-muted-foreground">·</span>{" "}
+          <span className="text-muted-foreground">/</span>{" "}
           <span className="font-mono text-[11px] text-muted-foreground">WORKFLOW.md</span>
         </header>
+        {error && (
+          <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
+            {error}
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-2xl px-4 py-8">
-            <h2 className="text-lg font-semibold">No workflow yet</h2>
+            <h2 className="text-lg font-semibold">WORKFLOW.md is missing</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              WORKFLOW.md tells Coding Assistants what to do on every task — who
-              runs, when a PR opens, when a task is completed. Pick a template to
-              start, or ask Clarise to draft one for you.
+              Choose a template to create the root workflow file for this repository.
             </p>
             <div className="mt-5 grid gap-2 sm:grid-cols-3">
-              {Object.entries(TEMPLATES).map(([k, t]) => (
+              {workflow.templates.map((template) => (
                 <button
-                  key={k}
-                  onClick={() => updatePage(page.id, { body: t.body })}
-                  className="group rounded-lg border p-3 text-left hover:border-foreground/20 transition-colors"
+                  key={template.id}
+                  onClick={() => createFromTemplate(template.id)}
+                  disabled={pending != null}
+                  className="group rounded-lg border p-3 text-left transition-colors hover:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <div className="flex items-center gap-1.5 text-sm font-medium">
                     <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
-                    {t.label}
+                    {template.label}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{t.desc}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
                 </button>
               ))}
             </div>
-            <button
-              onClick={() =>
-                startDraft(repoKey, "workflow", {
-                  title: "WORKFLOW.md",
-                  body: TEMPLATES.simple.body,
-                })
-              }
-              className="mt-4 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[12px] hover:bg-muted"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-violet-500" /> Start as a draft instead
-            </button>
           </div>
         </div>
       </div>
@@ -158,11 +191,13 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <MarkdownEditor
-        page={page}
-        fixedTitle
-        bodyPlaceholder="Define your workflow hooks. Markdown is preserved."
-        rightToolbarSlot={
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
+        <div className="text-sm">
+          <span className="font-semibold">Workflow</span>{" "}
+          <span className="text-muted-foreground">/</span>{" "}
+          <span className="font-mono text-[11px] text-muted-foreground">WORKFLOW.md</span>
+        </div>
+        <div className="flex items-center gap-2">
           <span
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
@@ -182,46 +217,62 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
               </>
             )}
           </span>
-        }
-        belowBodySlot={
-          <section className="mt-6 rounded-lg border bg-muted/30 p-3">
+          <button
+            onClick={save}
+            disabled={!dirty || pending != null}
+            className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {pending === "save" ? "Saving..." : dirty ? "Save WORKFLOW.md" : "Saved"}
+          </button>
+        </div>
+      </header>
+
+      {error && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
+          {error}
+        </div>
+      )}
+
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-4xl px-4 py-5 sm:px-8">
+          <textarea
+            value={body}
+            onChange={(event) => {
+              setBody(event.target.value);
+              setDirty(true);
+            }}
+            spellCheck={false}
+            aria-label="WORKFLOW.md body"
+            className="min-h-[60svh] w-full resize-y rounded-md border bg-background p-3 font-mono text-[13px] leading-6 outline-none focus:ring-2 focus:ring-ring"
+          />
+
+          <section className="mt-4 rounded-lg border bg-muted/30 p-3">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Validation
             </h3>
             {errors.length === 0 ? (
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Workflow looks good. Coding Assistants will follow these hooks
-                on the next task in {repoKey}.
+                Workflow looks good. Coding Assistants will follow these hooks on the
+                next task in {repoKey}.
               </p>
             ) : (
               <ul className="mt-2 space-y-1.5">
-                {errors.map((e, i) => (
+                {errors.map((item, index) => (
                   <li
-                    key={i}
+                    key={`${item.line}-${index}`}
                     className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-[11px]"
                   >
                     <span className="font-mono text-amber-600 dark:text-amber-400">
-                      L{e.line}
+                      L{item.line}
                     </span>{" "}
-                    <span className="text-foreground">{e.message}</span>
+                    <span className="text-foreground">{item.message}</span>
                   </li>
                 ))}
               </ul>
             )}
-            <button
-              onClick={() =>
-                startDraft(repoKey, "workflow", {
-                  title: "WORKFLOW.md",
-                  body: TEMPLATES.reviewFirst.body,
-                })
-              }
-              className="mt-3 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] hover:bg-muted"
-            >
-              <Sparkles className="h-3 w-3 text-violet-500" /> Ask Clarise to fix this
-            </button>
           </section>
-        }
-      />
+        </div>
+      </main>
     </div>
   );
 }

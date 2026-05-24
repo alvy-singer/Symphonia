@@ -1,5 +1,3 @@
-import { notFound } from "next/navigation";
-import { repositories } from "@/data/mock";
 import { DocsProvider } from "@/lib/docs-store";
 import { NewTaskProvider } from "@/components/new-task-dialog";
 import { Clarise } from "@/components/clarise";
@@ -13,15 +11,14 @@ export default async function RepoLayout({
   params: Promise<{ repoKey: string }>;
 }) {
   const { repoKey } = await params;
-  const repo = repositories.find((r) => r.key.toLowerCase() === repoKey.toLowerCase());
-  if (!repo) notFound();
+  const key = repoKey.toUpperCase();
 
   return (
     <DocsProvider>
-      <NewTaskProvider>
-        <RepoLayoutClient repoKey={repo.key}>
+      <NewTaskProvider repoKey={key}>
+        <RepoLayoutClient repoKey={key}>
           {children}
-          <Clarise repoKey={repo.key} />
+          <Clarise repoKey={key} />
         </RepoLayoutClient>
       </NewTaskProvider>
     </DocsProvider>

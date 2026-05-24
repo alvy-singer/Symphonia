@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import {
   Dialog,
   DialogPortal,
@@ -10,33 +11,79 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Paperclip, Maximize2, X, MoreHorizontal } from "lucide-react";
 import { TaskStatusIcon } from "@/components/icons/task-status-icons";
 import { cn } from "@/lib/utils";
+import type { ServiceTask } from "@/lib/task-model";
 
-type Ctx = { open: () => void };
+type NewTaskInit = { title?: string; body?: string };
+type Ctx = { open: (init?: NewTaskInit) => void };
 const NewTaskCtx = createContext<Ctx>({ open: () => {} });
 export const useNewTask = () => useContext(NewTaskCtx);
 
-export function NewTaskProvider({ children }: { children: ReactNode }) {
+export function NewTaskProvider({
+  children,
+  repoKey,
+}: {
+  children: ReactNode;
+  repoKey: string;
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [createMore, setCreateMore] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   const reset = () => {
     setTitle("");
     setDescription("");
+    setError(null);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!title.trim()) return;
-    if (createMore) reset();
-    else {
-      setIsOpen(false);
-      reset();
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title, body: description }),
+      });
+      const payload = (await res.json()) as { task?: ServiceTask; error?: string };
+      if (!res.ok || !payload.task) {
+        throw new Error(payload.error ?? "Could not create task");
+      }
+
+      window.dispatchEvent(
+        new CustomEvent("symphonia:taskCreated", {
+          detail: { repoKey, task: payload.task },
+        }),
+      );
+      router.refresh();
+
+      if (createMore) reset();
+      else {
+        setIsOpen(false);
+        reset();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create task");
+    } finally {
+      setPending(false);
     }
   };
 
   return (
-    <NewTaskCtx.Provider value={{ open: () => setIsOpen(true) }}>
+    <NewTaskCtx.Provider
+      value={{
+        open: (init) => {
+          setTitle(init?.title ?? "");
+          setDescription(init?.body ?? "");
+          setError(null);
+          setIsOpen(true);
+        },
+      }}
+    >
       {children}
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogPortal>
@@ -53,9 +100,9 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
             <div className="flex items-center justify-between px-3 py-2 border-b">
               <div className="flex items-center gap-1.5 text-xs">
                 <span className="grid h-5 w-5 place-items-center rounded bg-indigo-500/20 text-indigo-400 text-[10px] font-bold">
-                  S
+                  {repoKey[0] ?? "S"}
                 </span>
-                <span className="font-medium">SYM</span>
+                <span className="font-medium">{repoKey}</span>
                 <span className="text-muted-foreground">›</span>
                 <span className="text-muted-foreground">New task</span>
               </div>
@@ -87,6 +134,11 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
                 rows={4}
                 className="mt-2 w-full resize-none bg-transparent text-sm placeholder:text-muted-foreground/70 outline-none"
               />
+              {error && (
+                <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+                  {error}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
@@ -167,10 +219,10 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
                 </label>
                 <button
                   onClick={handleCreate}
-                  disabled={!title.trim()}
+                  disabled={!title.trim() || pending}
                   className="rounded-md bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Create task
+                  {pending ? "Creating…" : "Create task"}
                 </button>
               </div>
             </div>

@@ -5,6 +5,7 @@ import { CommandPaletteProvider } from "@/components/command-palette";
 import { DraftHost, useDraftHost } from "@/components/draft-host";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ClariseProvider } from "@/components/clarise";
+import { useNewTask } from "@/components/new-task-dialog";
 
 /**
  * Bridges the per-repo providers so they share the in-memory view-mode state
@@ -54,9 +55,11 @@ function CommandPaletteWithDraftHandle({
   onAsk: () => void;
 }) {
   const { startDraft } = useDraftHost();
+  const newTask = useNewTask();
 
   return (
     <CommandPaletteProvider
+      defaultRepoKey={repoKey}
       onAskClarise={onAsk}
       onSwitchView={(mode) => {
         try {
@@ -69,6 +72,7 @@ function CommandPaletteWithDraftHandle({
         }
       }}
       onNewDraft={(repo, category) => startDraft(repo, category)}
+      onNewTask={() => newTask.open()}
     >
       {children}
     </CommandPaletteProvider>

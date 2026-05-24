@@ -1,8 +1,4 @@
-import { NextResponse } from "next/server";
-import {
-  getRepositoryTask,
-  patchRepositoryTask,
-} from "@/lib/server/task-store";
+import { jsonBody, proxyToSymphoniaService } from "@/lib/server/symphonia-service";
 
 export const runtime = "nodejs";
 
@@ -11,9 +7,9 @@ export async function GET(
   { params }: { params: Promise<{ repoKey: string; taskKey: string }> },
 ) {
   const { repoKey, taskKey } = await params;
-  const task = await getRepositoryTask(repoKey, decodeURIComponent(taskKey));
-  if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
-  return NextResponse.json({ task });
+  return proxyToSymphoniaService(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(taskKey)}`,
+  );
 }
 
 export async function PATCH(
@@ -21,8 +17,11 @@ export async function PATCH(
   { params }: { params: Promise<{ repoKey: string; taskKey: string }> },
 ) {
   const { repoKey, taskKey } = await params;
-  const payload = await request.json();
-  const task = await patchRepositoryTask(repoKey, decodeURIComponent(taskKey), payload);
-  return NextResponse.json({ task });
+  return proxyToSymphoniaService(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(taskKey)}`,
+    {
+      method: "PATCH",
+      body: await jsonBody(request),
+    },
+  );
 }
-

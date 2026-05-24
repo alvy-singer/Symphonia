@@ -4,11 +4,11 @@ export const runtime = "nodejs";
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ repoKey: string; taskKey: string }> },
+  { params }: { params: Promise<{ repoKey: string }> },
 ) {
-  const { repoKey, taskKey } = await params;
+  const { repoKey } = await params;
   return proxyToSymphoniaService(
-    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(taskKey)}/events`,
+    `/api/repositories/${encodeURIComponent(repoKey)}/workflow/from-template`,
     {
       method: "POST",
       body: await jsonBody(request),

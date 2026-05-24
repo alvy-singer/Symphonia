@@ -13,6 +13,7 @@ import { Sparkles, Send, X, FilePlus2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATEGORY_SINGULAR, type DocCategory } from "@/lib/docs-store";
 import { useDraftHost } from "@/components/draft-host";
+import { useNewTask } from "@/components/new-task-dialog";
 
 interface Message {
   id: string;
@@ -83,6 +84,7 @@ export function Clarise({ repoKey }: { repoKey: string }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const { startDraft } = useDraftHost();
+  const newTask = useNewTask();
   const { openSignal } = useContext(SignalCtx);
 
   // Open when the command palette pings.
@@ -116,6 +118,14 @@ export function Clarise({ repoKey }: { repoKey: string }) {
   ) => {
     if (!msg.saveable) return;
     const category = overrideCategory ?? msg.saveable.category;
+    if (category === "task") {
+      newTask.open({
+        title: msg.saveable.suggestedTitle,
+        body: msg.content,
+      });
+      setOpen(false);
+      return;
+    }
     startDraft(repoKey, category, {
       title: msg.saveable.suggestedTitle,
       body: msg.content,

@@ -7,16 +7,16 @@ export async function GET(
   { params }: { params: Promise<{ repoKey: string }> },
 ) {
   const { repoKey } = await params;
-  return proxyToSymphoniaService(`/api/repositories/${encodeURIComponent(repoKey)}/tasks`);
+  return proxyToSymphoniaService(`/api/repositories/${encodeURIComponent(repoKey)}/workflow`);
 }
 
-export async function POST(
+export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ repoKey: string }> },
 ) {
   const { repoKey } = await params;
-  return proxyToSymphoniaService(`/api/repositories/${encodeURIComponent(repoKey)}/tasks`, {
-    method: "POST",
+  return proxyToSymphoniaService(`/api/repositories/${encodeURIComponent(repoKey)}/workflow`, {
+    method: "PATCH",
     body: await jsonBody(request),
   });
 }

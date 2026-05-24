@@ -17,8 +17,9 @@ import {
 import { TaskStatusIcon } from "@/components/icons/task-status-icons";
 import { PriorityIcon } from "@/components/icons/status-icons";
 import { UserAvatar } from "@/components/avatar-stack";
-import { useDraftHost } from "@/components/draft-host";
+import { useNewTask } from "@/components/new-task-dialog";
 import { cn } from "@/lib/utils";
+import type { WorkspaceState } from "@/lib/repository-model";
 import {
   Filter,
   Plus,
@@ -155,6 +156,27 @@ function TaskRow({
 
 const PRIORITIES: Priority[] = ["urgent", "high", "medium", "low", "no-priority"];
 
+async function fetchWorkspace(repoKey: string): Promise<WorkspaceState> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/workspace`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { workspace?: WorkspaceState; error?: string };
+  if (!res.ok || !payload.workspace) throw new Error(payload.error ?? "Could not load workspace");
+  return payload.workspace;
+}
+
+async function initializeWorkspace(repoKey: string): Promise<WorkspaceState> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/workspace/initialize`,
+    { method: "POST" },
+  );
+  const payload = (await res.json()) as { workspace?: WorkspaceState; error?: string };
+  if (!res.ok || !payload.workspace) {
+    throw new Error(payload.error ?? "Could not create workspace folders");
+  }
+  return payload.workspace;
+}
+
 /**
  * Repository Overview — Tasks board/list, the locked default landing view.
  *
@@ -168,8 +190,10 @@ export function TasksView({ repoKey }: { repoKey: string }) {
   const [tasks, setTasks] = useState<ServiceTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
+  const [workspacePending, setWorkspacePending] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
-  const { startDraft } = useDraftHost();
+  const newTask = useNewTask();
   const repoSlug = repoKey.toLowerCase();
 
   // Hydrate the per-repo view mode from localStorage and listen for command
@@ -216,9 +240,12 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetchTasks(repoKey)
-      .then((next) => {
-        if (!cancelled) setTasks(next);
+    Promise.all([fetchWorkspace(repoKey), fetchTasks(repoKey)])
+      .then(([nextWorkspace, nextTasks]) => {
+        if (!cancelled) {
+          setWorkspace(nextWorkspace);
+          setTasks(nextTasks);
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not load tasks");
@@ -229,6 +256,19 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     return () => {
       cancelled = true;
     };
+  }, [repoKey]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ repoKey: string; task: ServiceTask }>).detail;
+      if (detail?.repoKey !== repoKey) return;
+      setTasks((current) => [
+        detail.task,
+        ...current.filter((task) => task.key !== detail.task.key),
+      ]);
+    };
+    window.addEventListener("symphonia:taskCreated", handler as EventListener);
+    return () => window.removeEventListener("symphonia:taskCreated", handler as EventListener);
   }, [repoKey]);
 
   const onEvent = async (
@@ -250,6 +290,18 @@ export function TasksView({ repoKey }: { repoKey: string }) {
       setError(err instanceof Error ? err.message : "Could not update task");
     } finally {
       setPendingKey(null);
+    }
+  };
+
+  const createWorkspaceFolders = async () => {
+    setWorkspacePending(true);
+    setError(null);
+    try {
+      setWorkspace(await initializeWorkspace(repoKey));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create workspace folders");
+    } finally {
+      setWorkspacePending(false);
     }
   };
 
@@ -305,7 +357,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
             <SlidersHorizontal className="h-3.5 w-3.5" /> Display
           </button>
           <button
-            onClick={() => startDraft(repoKey, "task")}
+            onClick={() => newTask.open()}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-2 py-1 text-[12px] hover:opacity-90"
           >
             <Plus className="h-3.5 w-3.5" /> New task
@@ -316,6 +368,36 @@ export function TasksView({ repoKey }: { repoKey: string }) {
       {error && (
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
           {error}
+        </div>
+      )}
+
+      {workspace && (!workspace.initialized || !workspace.workflow.exists) && (
+        <div className="border-b bg-muted/30 px-4 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            {!workspace.initialized && (
+              <>
+                <span className="text-muted-foreground">Workspace folders are missing.</span>
+                <button
+                  onClick={createWorkspaceFolders}
+                  disabled={workspacePending}
+                  className="rounded-md border bg-background px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {workspacePending ? "Creating…" : "Create workspace folders"}
+                </button>
+              </>
+            )}
+            {!workspace.workflow.exists && (
+              <>
+                <span className="text-muted-foreground">WORKFLOW.md is missing.</span>
+                <Link
+                  href={`/r/${repoSlug}/workflow`}
+                  className="rounded-md border bg-background px-2 py-1 hover:bg-muted"
+                >
+                  Create from template
+                </Link>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -340,7 +422,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                     {grouped[s].length}
                   </span>
                   <button
-                    onClick={() => startDraft(repoKey, "task")}
+                    onClick={() => newTask.open()}
                     aria-label={`New task in ${TASK_STATUS_LABELS[s]}`}
                     className="ml-auto grid h-5 w-5 place-items-center rounded hover:bg-background text-muted-foreground"
                   >

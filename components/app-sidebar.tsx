@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   Hash,
@@ -15,12 +16,13 @@ import {
   Users,
   ArrowLeft,
 } from "lucide-react";
-import { repositories } from "@/data/mock";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/theme-provider";
 import { DocTree } from "@/components/sidebar/doc-tree";
 import { useCommandPalette } from "@/components/command-palette";
 import { useDraftHost } from "@/components/draft-host";
+import { useNewTask } from "@/components/new-task-dialog";
+import type { RepositorySummary } from "@/lib/repository-model";
 
 interface Props {
   repoKey: string;
@@ -41,9 +43,29 @@ export function AppSidebar({ repoKey }: Props) {
   const { theme, toggle } = useTheme();
   const repoSlug = repoKey.toLowerCase();
   const base = `/r/${repoSlug}`;
-  const repo = repositories.find((r) => r.key.toLowerCase() === repoSlug);
+  const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const palette = useCommandPalette();
   const { startDraft } = useDraftHost();
+  const newTask = useNewTask();
+  const repo = useMemo(
+    () => repositories.find((r) => r.key.toLowerCase() === repoSlug),
+    [repositories, repoSlug],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/repositories", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Could not load repositories"))))
+      .then((payload: { repositories: RepositorySummary[] }) => {
+        if (!cancelled) setRepositories(payload.repositories ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRepositories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isActive = (to: string) => pathname === to || pathname.startsWith(to + "/");
 
@@ -70,7 +92,7 @@ export function AppSidebar({ repoKey }: Props) {
             <Search className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => startDraft(repoKey, "task")}
+            onClick={() => newTask.open()}
             aria-label="New task"
             title="New task"
             className="grid h-7 w-7 place-items-center rounded-md hover:bg-sidebar-accent"
@@ -122,7 +144,10 @@ export function AppSidebar({ repoKey }: Props) {
           </div>
           <DocTree
             repoKey={repoKey}
-            onNew={(category) => startDraft(repoKey, category)}
+            onNew={(category) => {
+              if (category === "task") newTask.open();
+              else startDraft(repoKey, category);
+            }}
           />
         </div>
 
@@ -157,9 +182,10 @@ export function AppSidebar({ repoKey }: Props) {
           <div className="space-y-0.5">
             {repositories.map((t) => {
               const active = t.key.toLowerCase() === repoSlug;
+              const color = colorForRepo(t.key);
               return (
                 <Link
-                  key={t.id}
+                  key={t.key}
                   href={`/r/${t.key.toLowerCase()}/tasks`}
                   className={cn(
                     "w-full flex items-center gap-2 rounded-md px-2 py-1 text-[13px] transition-colors",
@@ -171,12 +197,12 @@ export function AppSidebar({ repoKey }: Props) {
                   <span
                     className={cn(
                       "grid h-5 w-5 place-items-center rounded text-[10px] font-bold bg-muted",
-                      t.color,
+                      color,
                     )}
                   >
                     {t.key[0]}
                   </span>
-                  <span className="flex-1 text-left truncate">{t.name.split("/")[1]}</span>
+                  <span className="flex-1 text-left truncate">{shortRepoName(t.name)}</span>
                   <Hash className="h-3 w-3 text-muted-foreground" />
                 </Link>
               );
@@ -203,6 +229,15 @@ export function AppSidebar({ repoKey }: Props) {
       </div>
     </aside>
   );
+}
+
+function shortRepoName(name: string): string {
+  return name.includes("/") ? name.split("/").at(-1) || name : name;
+}
+
+function colorForRepo(key: string): string {
+  const colors = ["text-rose-500", "text-sky-500", "text-violet-500", "text-emerald-500"];
+  return colors[key.charCodeAt(0) % colors.length] ?? colors[0];
 }
 
 function NavLink({

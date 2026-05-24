@@ -26,7 +26,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { repositories } from "@/data/mock";
+import type { RepositorySummary } from "@/lib/repository-model";
 import { useDocs, type DocCategory, type DocPage } from "@/lib/docs-store";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +59,8 @@ interface ProviderProps {
   onAskClarise?: () => void;
   onSwitchView?: (mode: "board" | "list") => void;
   onNewDraft?: (repoKey: string, category: DocCategory) => void;
+  onNewTask?: (repoKey: string) => void;
+  defaultRepoKey?: string;
 }
 
 export function CommandPaletteProvider({
@@ -66,11 +68,14 @@ export function CommandPaletteProvider({
   onAskClarise,
   onSwitchView,
   onNewDraft,
+  onNewTask,
+  defaultRepoKey,
 }: ProviderProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [repoScope, setRepoScope] = useState<string | undefined>();
+  const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -98,6 +103,21 @@ export function CommandPaletteProvider({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/repositories", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Could not load repositories"))))
+      .then((payload: { repositories: RepositorySummary[] }) => {
+        if (!cancelled) setRepositories(payload.repositories ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRepositories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const close = useCallback(() => setIsOpen(false), []);
   const runAndClose = useCallback(
     (fn: () => void) => {
@@ -114,7 +134,7 @@ export function CommandPaletteProvider({
     // Repository navigation
     repositories.forEach((r) => {
       cmds.push({
-        id: `repo-${r.id}`,
+        id: `repo-${r.key}`,
         label: r.name,
         hint: "Open repository",
         group: "Navigate",
@@ -124,7 +144,7 @@ export function CommandPaletteProvider({
       });
     });
 
-    const repoForActions = repoScope ?? repositories[0]?.key;
+    const repoForActions = repoScope ?? defaultRepoKey ?? repositories[0]?.key;
 
     if (repoForActions) {
       const s = slug(repoForActions);
@@ -190,10 +210,10 @@ export function CommandPaletteProvider({
         {
           id: "create-task",
           label: "New Task",
-          hint: "Opens an editable draft",
+          hint: "Create Markdown task",
           group: "Create",
           icon: <Plus className="h-3.5 w-3.5" />,
-          run: () => onNewDraft?.(repoForActions, "task"),
+          run: () => onNewTask?.(repoForActions),
         },
         {
           id: "create-project",
@@ -282,7 +302,17 @@ export function CommandPaletteProvider({
     });
 
     return cmds;
-  }, [pages, repoScope, router, onAskClarise, onSwitchView, onNewDraft]);
+  }, [
+    pages,
+    repoScope,
+    repositories,
+    router,
+    onAskClarise,
+    onSwitchView,
+    onNewDraft,
+    onNewTask,
+    defaultRepoKey,
+  ]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
