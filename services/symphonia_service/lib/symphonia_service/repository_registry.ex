@@ -86,6 +86,21 @@ defmodule SymphoniaService.RepositoryRegistry do
     end
   end
 
+  def remove(registry_path, key) do
+    normalized_key = normalize_key(key)
+    repositories = list(registry_path)
+    {removed, kept} = Enum.split_with(repositories, &(&1["key"] == normalized_key))
+
+    case removed do
+      [repository] ->
+        save(registry_path, kept)
+        repository
+
+      [] ->
+        raise ArgumentError, "Repository #{normalized_key} is not registered."
+    end
+  end
+
   defp read(registry_path) do
     case File.read(registry_path) do
       {:ok, ""} ->

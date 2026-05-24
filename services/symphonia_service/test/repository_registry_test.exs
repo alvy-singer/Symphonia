@@ -45,4 +45,19 @@ defmodule SymphoniaService.RepositoryRegistryTest do
     assert [stored] = RepositoryRegistry.list(registry_path)
     assert stored["key"] == "SYM"
   end
+
+  test "removes repositories from the registry without deleting files", %{
+    registry_path: registry_path,
+    repo_path: repo_path
+  } do
+    File.mkdir_p!(Path.join(repo_path, ".git"))
+    File.write!(Path.join(repo_path, "README.md"), "local worktree")
+
+    RepositoryRegistry.add(registry_path, %{"path" => repo_path, "key" => "SYM"})
+    removed = RepositoryRegistry.remove(registry_path, "sym")
+
+    assert removed["key"] == "SYM"
+    assert RepositoryRegistry.list(registry_path) == []
+    assert File.exists?(Path.join(repo_path, "README.md"))
+  end
 end

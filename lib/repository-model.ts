@@ -49,6 +49,19 @@ export interface GitHubInstallation {
   updatedAt?: string;
 }
 
+export interface GitHubInstalledRepository {
+  owner: string;
+  name: string;
+  fullName?: string;
+  repoId?: number;
+  url?: string;
+  cloneUrl?: string;
+  defaultBranch?: string;
+  installationId?: number | string;
+  accountLogin?: string;
+  accountType?: string;
+}
+
 export interface GitHubRemote {
   owner: string;
   name: string;

@@ -1,29 +1,48 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ChevronRight, ExternalLink, FolderGit2, Github, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import type { GitHubConnectionState, RepositorySummary } from "@/lib/repository-model";
+  Check,
+  ChevronRight,
+  ExternalLink,
+  FolderGit2,
+  Github,
+  Search,
+  Trash2,
+} from "lucide-react";
+import type {
+  GitHubConnectionState,
+  GitHubInstalledRepository,
+  RepositorySummary,
+} from "@/lib/repository-model";
 import { cn } from "@/lib/utils";
 
 export default function RepositoriesPage() {
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
+  const [githubRepositories, setGitHubRepositories] = useState<GitHubInstalledRepository[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [connectOpen, setConnectOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [githubConnection, setGitHubConnection] = useState<GitHubConnectionState | null>(null);
+  const [removingKey, setRemovingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("github") === "installed") {
+      setNotice("GitHub connected. Allowed repositories are available below.");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (params.get("github") === "install-canceled") {
+      setError("GitHub installation was canceled.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+
     Promise.all([
       fetch("/api/repositories", { cache: "no-store" }).then(async (res) => {
         const payload = (await res.json()) as {
@@ -41,11 +60,20 @@ export default function RepositoriesPage() {
         if (!res.ok) return null;
         return payload.connection ?? null;
       }),
+      fetch("/api/github/repositories", { cache: "no-store" }).then(async (res) => {
+        const payload = (await res.json()) as {
+          repositories?: GitHubInstalledRepository[];
+          error?: string;
+        };
+        if (!res.ok) return [];
+        return payload.repositories ?? [];
+      }),
     ])
-      .then(([next, connection]) => {
+      .then(([next, connection, githubRepos]) => {
         if (!cancelled) {
           setRepositories(next);
           setGitHubConnection(connection);
+          setGitHubRepositories(githubRepos);
           setError(null);
         }
       })
@@ -55,25 +83,85 @@ export default function RepositoriesPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("connect") === "github" || params.get("github") === "installed") {
-      setConnectOpen(true);
-    }
-  }, []);
+  const localGitHubNames = useMemo(() => {
+    return new Set(
+      repositories
+        .map((repo) => {
+          if (!repo.github?.owner || !repo.github?.name) return null;
+          return `${repo.github.owner}/${repo.github.name}`.toLowerCase();
+        })
+        .filter((value): value is string => Boolean(value)),
+    );
+  }, [repositories]);
 
-  const filtered = useMemo(() => {
+  const githubOnlyRepositories = useMemo(() => {
+    return githubRepositories.filter((repo) => {
+      const fullName = (repo.fullName || `${repo.owner}/${repo.name}`).toLowerCase();
+      return !localGitHubNames.has(fullName);
+    });
+  }, [githubRepositories, localGitHubNames]);
+
+  const filteredLocalRepositories = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return repositories;
     return repositories.filter((repo) =>
       `${repo.name} ${repo.key} ${repo.path}`.toLowerCase().includes(q),
     );
   }, [repositories, query]);
+
+  const filteredGitHubRepositories = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return githubOnlyRepositories;
+    return githubOnlyRepositories.filter((repo) =>
+      `${repo.fullName ?? ""} ${repo.owner} ${repo.name} ${repo.accountLogin ?? ""}`
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [githubOnlyRepositories, query]);
+
+  const connectHref = githubConnection?.installationUrl;
+  const connectedCount = repositories.length + githubOnlyRepositories.length;
+  const hasVisibleRepositories =
+    filteredGitHubRepositories.length > 0 || filteredLocalRepositories.length > 0;
+
+  const openGitHubConnection = () => {
+    if (!connectHref) {
+      setError("GitHub connection is unavailable.");
+      return;
+    }
+
+    window.location.assign(connectHref);
+  };
+
+  const removeRepository = async (repository: RepositorySummary) => {
+    const confirmed = window.confirm(
+      `Remove ${repository.name} from Symphonía? Local files and GitHub access will not be changed.`,
+    );
+    if (!confirmed) return;
+
+    setRemovingKey(repository.key);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/repositories/${encodeURIComponent(repository.key)}`, {
+        method: "DELETE",
+      });
+      const payload = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "Could not remove repository");
+
+      setRepositories((current) => current.filter((repo) => repo.key !== repository.key));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove repository");
+    } finally {
+      setRemovingKey(null);
+    }
+  };
 
   return (
     <div className="min-h-svh bg-background text-foreground">
@@ -97,10 +185,16 @@ export default function RepositoriesPage() {
             />
           </div>
           <button
-            onClick={() => setConnectOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground hover:opacity-90"
+            onClick={openGitHubConnection}
+            disabled={!connectHref}
+            title={!connectHref ? "GitHub connection is unavailable" : undefined}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground hover:opacity-90",
+              !connectHref && "cursor-not-allowed opacity-50 hover:opacity-50",
+            )}
           >
-            <Github className="h-3.5 w-3.5" /> Connect to GitHub
+            <Github className="h-3.5 w-3.5" />
+            Connect to GitHub
           </button>
         </div>
       </header>
@@ -110,14 +204,20 @@ export default function RepositoriesPage() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Repositories</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Choose a repository to enter its workspace. Markdown files stay next to
-              the code they describe.
+              Choose repositories on GitHub and return here automatically.
             </p>
           </div>
           <span className="text-xs tabular-nums text-muted-foreground">
-            {repositories.length} registered
+            {connectedCount} connected
           </span>
         </div>
+
+        {notice && (
+          <div className="mb-4 flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+            <Check className="h-4 w-4" />
+            {notice}
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
@@ -129,68 +229,178 @@ export default function RepositoriesPage() {
           <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
             Loading repositories...
           </div>
-        ) : filtered.length === 0 ? (
+        ) : !hasVisibleRepositories ? (
           <div className="rounded-lg border border-dashed p-8 text-center">
             <FolderGit2 className="mx-auto h-8 w-8 text-muted-foreground" />
-            <h2 className="mt-3 text-sm font-medium">No repositories connected</h2>
+            <h2 className="mt-3 text-sm font-medium">
+              {connectedCount > 0 ? "No matching repositories" : "No repositories connected"}
+            </h2>
             <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-              Install the Symphonía GitHub App to choose the repositories it can
-              access, then link a local Git worktree.
+              Connect GitHub, choose repositories, and return here automatically.
             </p>
             <button
-              onClick={() => setConnectOpen(true)}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
+              onClick={openGitHubConnection}
+              disabled={!connectHref}
+              title={!connectHref ? "GitHub connection is unavailable" : undefined}
+              className={cn(
+                "mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90",
+                !connectHref && "cursor-not-allowed opacity-50 hover:opacity-50",
+              )}
             >
-              <Github className="h-4 w-4" /> Connect to GitHub
+              <Github className="h-4 w-4" />
+              Connect to GitHub
             </button>
           </div>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {filtered.map((repo) => (
-              <li key={repo.key}>
-                <RepositoryCard repository={repo} />
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-6">
+            {filteredGitHubRepositories.length > 0 && (
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="text-sm font-medium">GitHub repositories</h2>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {filteredGitHubRepositories.length}
+                  </span>
+                </div>
+                <ul className="grid gap-3 sm:grid-cols-2">
+                  {filteredGitHubRepositories.map((repo) => (
+                    <li key={`${repo.installationId}-${repo.fullName ?? `${repo.owner}/${repo.name}`}`}>
+                      <GitHubRepositoryCard repository={repo} manageUrl={githubConnection?.manageUrl} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {filteredLocalRepositories.length > 0 && (
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="text-sm font-medium">Local workspaces</h2>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {filteredLocalRepositories.length}
+                  </span>
+                </div>
+                <ul className="grid gap-3 sm:grid-cols-2">
+                  {filteredLocalRepositories.map((repo) => (
+                    <li key={repo.key}>
+                      <RepositoryCard
+                        repository={repo}
+                        removing={removingKey === repo.key}
+                        onRemove={removeRepository}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
         )}
       </main>
-
-      <ConnectRepositoryDialog
-        open={connectOpen}
-        onOpenChange={setConnectOpen}
-        githubConnection={githubConnection}
-        onAdded={(repo) => setRepositories((current) => upsertRepository(current, repo))}
-      />
     </div>
   );
 }
 
-function RepositoryCard({ repository }: { repository: RepositorySummary }) {
+function GitHubRepositoryCard({
+  repository,
+  manageUrl,
+}: {
+  repository: GitHubInstalledRepository;
+  manageUrl?: string;
+}) {
+  const fullName = repository.fullName || `${repository.owner}/${repository.name}`;
+
+  return (
+    <div className="rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20">
+      <div className="flex items-center gap-3">
+        <span className="grid h-9 w-9 place-items-center rounded-md bg-muted text-emerald-500">
+          <Github className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold">{fullName}</h3>
+          <p className="truncate text-[11px] text-muted-foreground">
+            Connected on GitHub
+            {repository.defaultBranch ? ` / ${repository.defaultBranch}` : ""}
+          </p>
+        </div>
+        {repository.url && (
+          <a
+            href={repository.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            Open
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
+      </div>
+
+      <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
+        <Stat label="Status" value="Connected" />
+        <Stat label="Account" value={repository.accountLogin ?? repository.owner} />
+        <Stat label="Branch" value={repository.defaultBranch ?? "-"} />
+      </dl>
+
+      {manageUrl && (
+        <a
+          href={manageUrl}
+          className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          Change selection
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      )}
+    </div>
+  );
+}
+
+function RepositoryCard({
+  repository,
+  removing,
+  onRemove,
+}: {
+  repository: RepositorySummary;
+  removing: boolean;
+  onRemove: (repository: RepositorySummary) => void;
+}) {
   const workspace = repository.workspace;
   const folders = workspace?.initialized ? "Present" : "Missing";
   const workflow = workspace?.workflow.exists ? "Present" : "Missing";
 
   return (
-    <Link
-      href={`/r/${repository.key.toLowerCase()}/tasks`}
-      className="group block rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20"
-    >
+    <div className="rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20">
       <div className="flex items-center gap-3">
-        <span
-          className={cn(
-            "grid h-9 w-9 place-items-center rounded-md bg-muted text-sm font-bold",
-            colorForRepo(repository.key),
-          )}
+        <Link
+          href={`/r/${repository.key.toLowerCase()}/tasks`}
+          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
         >
-          {repository.key[0]}
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold">{repository.name}</h3>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {repository.key} / {repository.path}
-          </p>
-        </div>
-        <ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+          <span
+            className={cn(
+              "grid h-9 w-9 place-items-center rounded-md bg-muted text-sm font-bold",
+              colorForRepo(repository.key),
+            )}
+          >
+            {repository.key[0]}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-semibold">{repository.name}</h3>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {repository.github?.owner && repository.github?.name
+                ? `${repository.github.owner}/${repository.github.name}`
+                : "Local workspace"}
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+        </Link>
+        <button
+          type="button"
+          onClick={() => onRemove(repository)}
+          disabled={removing}
+          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] text-muted-foreground hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label={`Remove ${repository.name} from Symphonía`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {removing ? "Removing" : "Remove"}
+        </button>
       </div>
 
       <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
@@ -198,193 +408,19 @@ function RepositoryCard({ repository }: { repository: RepositorySummary }) {
         <Stat label="Folders" value={folders} muted={!workspace?.initialized} />
         <Stat label="Workflow" value={workflow} muted={!workspace?.workflow.exists} />
       </dl>
-    </Link>
+    </div>
   );
 }
 
 function Stat({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
   return (
-    <div className="rounded-md bg-muted/40 py-2">
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
-      <dd className={cn("text-sm font-semibold tabular-nums", muted && "text-amber-600")}>
+    <div className="rounded-md bg-muted/40 px-1 py-2">
+      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dd className={cn("truncate text-sm font-semibold tabular-nums", muted && "text-amber-600")}>
         {value}
       </dd>
     </div>
   );
-}
-
-function ConnectRepositoryDialog({
-  open,
-  onOpenChange,
-  githubConnection,
-  onAdded,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  githubConnection: GitHubConnectionState | null;
-  onAdded: (repo: RepositorySummary) => void;
-}) {
-  const [path, setPath] = useState("");
-  const [key, setKey] = useState("");
-  const [name, setName] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!path.trim()) return;
-    setPending(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/repositories", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          path: path.trim(),
-          key: key.trim() || undefined,
-          name: name.trim() || undefined,
-        }),
-      });
-      const payload = (await res.json()) as { repository?: RepositorySummary; error?: string };
-      if (!res.ok || !payload.repository) {
-        throw new Error(payload.error ?? "Could not add repository");
-      }
-
-      onAdded(payload.repository);
-      onOpenChange(false);
-      setPath("");
-      setKey("");
-      setName("");
-      router.push(`/r/${payload.repository.key.toLowerCase()}/tasks`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not connect repository");
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const installUrl = githubConnection?.installationUrl;
-  const appInstalled = githubConnection?.installed || (githubConnection?.installedRepositoriesCount ?? 0) > 0;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <div>
-          <DialogTitle className="text-base font-semibold">Connect to GitHub</DialogTitle>
-          <DialogDescription className="mt-1 text-sm text-muted-foreground">
-            Install the Symphonía GitHub App, choose repositories on GitHub, then
-            connect the matching local worktree.
-          </DialogDescription>
-        </div>
-
-        <div className="rounded-md border bg-muted/25 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-medium">GitHub App access</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {appInstalled
-                  ? `Symphonía is installed on ${githubConnection?.installedRepositoriesCount ?? 0} repositories.`
-                  : "Choose exactly which GitHub repositories Symphonía can access."}
-              </div>
-            </div>
-            {installUrl ? (
-              <a
-                href={installUrl}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border bg-background px-2.5 py-1 text-xs hover:bg-accent"
-              >
-                {appInstalled ? "Manage access" : "Install GitHub App"}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            ) : (
-              <span className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300">
-                Install URL missing
-              </span>
-            )}
-          </div>
-          {!installUrl && (
-            <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-              Set SYMPHONIA_GITHUB_APP_NAME or SYMPHONIA_GITHUB_INSTALL_URL on
-              the local service to enable GitHub installation.
-            </p>
-          )}
-        </div>
-
-        <form onSubmit={submit} className="space-y-3">
-          <div>
-            <div className="text-sm font-medium">Use existing local repository</div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Browser folder picking is not available here yet, so local worktrees
-              are connected by absolute path.
-            </p>
-          </div>
-          <label className="block text-xs font-medium">
-            Local repository path
-            <input
-              autoFocus
-              value={path}
-              onChange={(event) => setPath(event.target.value)}
-              placeholder="/Users/alvy/Projects/Symphonia"
-              className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm font-mono outline-none focus:ring-2 focus:ring-ring"
-            />
-          </label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-xs font-medium">
-              Key
-              <input
-                value={key}
-                onChange={(event) => setKey(event.target.value)}
-                placeholder="SYM"
-                className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </label>
-            <label className="block text-xs font-medium">
-              Name
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="agora-creations/Symphonia"
-                className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </label>
-          </div>
-
-          {error && (
-            <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
-              {error}
-            </p>
-          )}
-
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-            >
-              Cancel
-            </button>
-            <button
-              disabled={!path.trim() || pending}
-              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {pending ? "Connecting..." : "Connect local repository"}
-            </button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function upsertRepository(
-  repositories: RepositorySummary[],
-  repository: RepositorySummary,
-): RepositorySummary[] {
-  return [
-    repository,
-    ...repositories.filter((item) => item.key !== repository.key),
-  ].sort((a, b) => a.key.localeCompare(b.key));
 }
 
 function colorForRepo(key: string): string {

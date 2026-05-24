@@ -10,7 +10,6 @@ import {
 } from "@/data/mock";
 import type {
   GitHubConnectionState,
-  RepositoryGitHubState,
 } from "@/lib/repository-model";
 import {
   User as UserIcon,
@@ -21,9 +20,9 @@ import {
   Plug,
   CreditCard,
   Check,
+  AlertTriangle,
   Github,
   ExternalLink,
-  AlertTriangle,
   Link2,
   ChevronRight,
   ChevronDown,
@@ -317,14 +316,6 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
   );
 }
 
-interface DeviceFlowState {
-  deviceCode: string;
-  userCode: string;
-  verificationUri: string;
-  interval: number;
-  expiresIn: number;
-}
-
 async function fetchGitHubConnection(): Promise<GitHubConnectionState> {
   const res = await fetch("/api/github/connection", { cache: "no-store" });
   const payload = (await res.json()) as { connection?: GitHubConnectionState; error?: string };
@@ -332,30 +323,16 @@ async function fetchGitHubConnection(): Promise<GitHubConnectionState> {
   return payload.connection;
 }
 
-async function fetchRepositoryGitHub(repoKey: string): Promise<RepositoryGitHubState> {
-  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/github`, {
-    cache: "no-store",
-  });
-  const payload = (await res.json()) as { github?: RepositoryGitHubState; error?: string };
-  if (!res.ok || !payload.github) throw new Error(payload.error ?? "Could not load GitHub repository state");
-  return payload.github;
-}
-
 function GitHubIntegration({ repoKey }: { repoKey: string }) {
   const [connection, setConnection] = useState<GitHubConnectionState | null>(null);
-  const [repoState, setRepoState] = useState<RepositoryGitHubState | null>(null);
-  const [device, setDevice] = useState<DeviceFlowState | null>(null);
-  const [installationId, setInstallationId] = useState("");
-  const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchGitHubConnection(), fetchRepositoryGitHub(repoKey)])
-      .then(([nextConnection, nextRepoState]) => {
+    fetchGitHubConnection()
+      .then((nextConnection) => {
         if (cancelled) return;
         setConnection(nextConnection);
-        setRepoState(nextRepoState);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not load GitHub");
@@ -363,156 +340,13 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
     return () => {
       cancelled = true;
     };
-  }, [repoKey]);
-
-  useEffect(() => {
-    if (!device) return;
-    const timer = window.setTimeout(() => {
-      void pollDevice(device);
-    }, Math.max(device.interval, 1) * 1000);
-    return () => window.clearTimeout(timer);
-  }, [device]);
-
-  const startConnection = async () => {
-    setPending("connect");
-    setError(null);
-    try {
-      const res = await fetch("/api/github/connect/start", { method: "POST" });
-      const payload = (await res.json()) as DeviceFlowState & { error?: string };
-      if (!res.ok) throw new Error(payload.error ?? "Could not start GitHub connection");
-      setDevice(payload);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start GitHub connection");
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const pollDevice = async (current: DeviceFlowState) => {
-    setPending("poll");
-    setError(null);
-    try {
-      const res = await fetch("/api/github/connect/poll", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          deviceCode: current.deviceCode,
-          interval: current.interval,
-        }),
-      });
-      const payload = (await res.json()) as {
-        connection?: GitHubConnectionState;
-        status?: string;
-        interval?: number;
-        retryAfter?: number;
-        error?: string;
-      };
-
-      if (res.status === 202) {
-        setDevice({ ...current, interval: payload.interval ?? current.interval });
-        return;
-      }
-
-      if (res.status === 429) {
-        setDevice({ ...current, interval: payload.retryAfter ?? current.interval });
-        return;
-      }
-
-      if (!res.ok || !payload.connection) {
-        throw new Error(payload.error ?? "Could not connect GitHub");
-      }
-
-      setConnection(payload.connection);
-      setDevice(null);
-      setRepoState(await fetchRepositoryGitHub(repoKey));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not connect GitHub");
-      setDevice(null);
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const linkLocalRepo = async () => {
-    setPending("link");
-    setError(null);
-    try {
-      const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/github/link`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const payload = (await res.json()) as { github?: RepositoryGitHubState; error?: string };
-      if (!res.ok || !payload.github) throw new Error(payload.error ?? "Could not link GitHub repo");
-      setRepoState((current) => ({
-        connection: current?.connection ?? connection ?? { connected: false },
-        detectedRemote: payload.github?.detectedRemote ?? current?.detectedRemote,
-        link: payload.github?.link ?? null,
-      }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not link GitHub repo");
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const completeInstallation = async () => {
-    const trimmed = installationId.trim();
-    if (!trimmed) return;
-
-    setPending("installation");
-    setError(null);
-    try {
-      const res = await fetch("/api/github/installations/complete", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ installation_id: trimmed }),
-      });
-      const payload = (await res.json()) as { connection?: GitHubConnectionState; error?: string };
-      if (!res.ok || !payload.connection) {
-        throw new Error(payload.error ?? "Could not record GitHub installation");
-      }
-      setConnection(payload.connection);
-      setRepoState(await fetchRepositoryGitHub(repoKey));
-      setInstallationId("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not record GitHub installation");
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const refreshInstallations = async () => {
-    setPending("refresh");
-    setError(null);
-    try {
-      const res = await fetch("/api/github/installations/refresh", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const payload = (await res.json()) as { connection?: GitHubConnectionState; error?: string };
-      if (!res.ok || !payload.connection) {
-        throw new Error(payload.error ?? "Could not refresh GitHub installations");
-      }
-      setConnection(payload.connection);
-      setRepoState(await fetchRepositoryGitHub(repoKey));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not refresh GitHub installations");
-    } finally {
-      setPending(null);
-    }
-  };
+  }, []);
 
   const connected = connection?.connected;
-  const link = repoState?.link;
-  const detected = repoState?.detectedRemote;
   const installed = connection?.installed || (connection?.installedRepositoriesCount ?? 0) > 0;
   const installedCount = connection?.installedRepositoriesCount ?? 0;
-  const accessState = repoState?.access?.state;
   const installUrl = withRepoState(connection?.installationUrl, repoKey);
   const manageUrl = connection?.manageUrl ?? connection?.installationUrl;
-  const canLink = accessState === "available" || connection?.authMode === "device_user_token";
 
   return (
     <div className="rounded-md border">
@@ -524,135 +358,37 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
           <div className="min-w-0">
             <div className="text-sm font-medium">GitHub</div>
             <div className="text-xs text-muted-foreground">
-              Install the Symphonía GitHub App to choose which repositories Symphonía can access.
+              Choose repositories on GitHub and return to Symphonía automatically.
             </div>
             {!connected && (
               <div className="mt-1 text-xs text-muted-foreground">
                 You can still manage local tasks without GitHub.
               </div>
             )}
-            {installed && !link && (
+            {installed && (
               <div className="mt-2 text-xs text-muted-foreground">
-                Symphonía is installed on {installedCount}{" "}
-                {installedCount === 1 ? "repository" : "repositories"}.
+                {installedCount} {installedCount === 1 ? "repository" : "repositories"} connected.
               </div>
             )}
-            {detected && (
-              <div className="mt-2 text-[11px] text-muted-foreground">
-                Detected local repository:{" "}
-                <span className="font-mono">
-                  {detected.owner}/{detected.name}
-                </span>
-              </div>
-            )}
-            {link && (
-              <div className="mt-2 text-[11px] text-muted-foreground">
-                This workspace is connected to{" "}
-                <a
-                  href={link.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono hover:text-foreground"
-                >
-                  {link.owner}/{link.name}
-                </a>
-                .
-              </div>
-            )}
-            {!link && accessState === "missing" && detected && (
-              <div className="mt-2 flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>Symphonía is not installed on this GitHub repository yet.</span>
-              </div>
-            )}
-            {connection?.deviceFallbackEnabled && (
-              <div className="mt-3 rounded-md border bg-muted/30 p-3 text-xs">
-                <div className="font-medium">Developer option</div>
-                <div className="mt-1 text-muted-foreground">
-                  Use GitHub device login for local testing.
-                </div>
-                {device && (
-                  <div className="mt-3 rounded-md border bg-background p-3">
-                    <div className="font-medium">Authorize Symphonía on GitHub</div>
-                    <div className="mt-1 text-muted-foreground">
-                      Enter code{" "}
-                      <span className="font-mono text-foreground">{device.userCode}</span>
-                    </div>
-                    <a
-                      href={device.verificationUri}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-2 inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 hover:bg-muted"
-                    >
-                      Open GitHub <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
-                )}
-                {!device && (
-                  <button
-                    onClick={startConnection}
-                    disabled={pending != null}
-                    className="mt-2 rounded-md border bg-background px-2.5 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {pending === "connect" ? "Connecting..." : "Connect with device flow"}
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="mt-3 rounded-md border bg-muted/20 p-3 text-xs">
-              <div className="font-medium">Manual recovery</div>
-              <div className="mt-1 text-muted-foreground">
-                Paste an installation ID if the local callback used the wrong port.
-              </div>
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                <input
-                  value={installationId}
-                  onChange={(event) => setInstallationId(event.target.value)}
-                  placeholder="Installation ID"
-                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 font-mono focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <button
-                  onClick={completeInstallation}
-                  disabled={!installationId.trim() || pending != null}
-                  className="rounded-md border bg-background px-2.5 py-1 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {pending === "installation" ? "Saving..." : "Save installation"}
-                </button>
-              </div>
-              {installed && (
-                <button
-                  onClick={refreshInstallations}
-                  disabled={pending != null}
-                  className="mt-2 rounded-md border bg-background px-2.5 py-1 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {pending === "refresh" ? "Refreshing..." : "Refresh GitHub installations"}
-                </button>
-              )}
-            </div>
             {error && (
               <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">{error}</div>
             )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {link ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
-              <Check className="h-3 w-3" />
-              Linked
-            </span>
-          ) : installed ? (
+          {installed && (
             <span className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs text-muted-foreground">
               <Check className="h-3 w-3" />
-              Installed
+              Connected
             </span>
-          ) : null}
+          )}
           {installUrl && !installed && (
             <a
               href={installUrl}
               rel="noreferrer"
               className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
             >
-              Install GitHub App
+              Connect to GitHub
             </a>
           )}
           {manageUrl && installed && (
@@ -662,16 +398,9 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
               rel="noreferrer"
               className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
             >
-              Manage access
+              Change selection
             </a>
           )}
-          <button
-            onClick={linkLocalRepo}
-            disabled={!canLink || pending != null}
-            className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {pending === "link" ? "Linking..." : link ? "Relink repository" : "Link this repository"}
-          </button>
         </div>
       </div>
     </div>

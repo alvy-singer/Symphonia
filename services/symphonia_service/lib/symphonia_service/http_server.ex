@@ -146,6 +146,19 @@ defmodule SymphoniaService.HTTPServer do
     error -> {400, %{"error" => Exception.message(error)}}
   end
 
+  defp route(%{method: "DELETE", path: path}, registry_path) do
+    case path_parts(path) do
+      ["api", "repositories", repo] ->
+        repository = RepositoryRegistry.remove(registry_path, repo)
+        {200, %{"repository" => public_repository(repository)}}
+
+      _ ->
+        {404, %{"error" => "Not found"}}
+    end
+  rescue
+    error -> {400, %{"error" => Exception.message(error)}}
+  end
+
   defp route(%{method: "POST", path: path, body: body}, registry_path) do
     case path_parts(path) do
       ["api", "github", "connect", "start"] ->
@@ -264,7 +277,7 @@ defmodule SymphoniaService.HTTPServer do
       "HTTP/1.1 #{status} #{reason}\r\n",
       "content-type: application/json\r\n",
       "access-control-allow-origin: *\r\n",
-      "access-control-allow-methods: GET,POST,PATCH,OPTIONS\r\n",
+      "access-control-allow-methods: GET,POST,PATCH,DELETE,OPTIONS\r\n",
       "access-control-allow-headers: content-type\r\n",
       "content-length: #{byte_size(body)}\r\n",
       "\r\n",
