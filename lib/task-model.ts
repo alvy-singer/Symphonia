@@ -51,6 +51,21 @@ export interface GitHubTaskMetadata {
   };
 }
 
+export interface CodingAssistantRun {
+  id: string;
+  state: "queued" | "running" | "completed" | "failed" | string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface CodingAssistantHandoff {
+  summary?: string;
+  filesChanged: string[];
+  nextReviewAction?: string;
+  headBranch?: string;
+  baseBranch?: string;
+}
+
 export interface ServiceTask {
   key: string;
   title: string;
@@ -60,6 +75,8 @@ export interface ServiceTask {
   assistant?: string;
   pausedReason?: PausedReason;
   pausedExplanation?: string;
+  run?: CodingAssistantRun | null;
+  handoff?: CodingAssistantHandoff | null;
   github?: GitHubTaskMetadata | null;
   githubIssue?: string;
   githubIssueState?: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Check,
@@ -20,6 +20,7 @@ import {
 } from "@/lib/task-model";
 import { TaskStatusIcon } from "@/components/icons/task-status-icons";
 import { PriorityIcon } from "@/components/icons/status-icons";
+import { useClarise } from "@/components/clarise";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -94,6 +95,25 @@ async function refreshPullRequest(repoKey: string, taskKey: string): Promise<Ser
   return data.task;
 }
 
+async function startCodingAssistantRun(
+  repoKey: string,
+  taskKey: string,
+): Promise<ServiceTask> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/coding-assistant/runs`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  const data = (await res.json()) as { task?: ServiceTask; error?: string };
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not start Coding Assistant");
+  return data.task;
+}
+
 type TaskAction =
   | {
       label: string;
@@ -105,7 +125,7 @@ type TaskAction =
     }
   | {
       label: string;
-      kind: "open_pull_request" | "refresh_pr";
+      kind: "coding_assistant_run" | "open_pull_request" | "refresh_pr";
       icon: React.ReactNode;
       primary?: boolean;
     }
@@ -130,6 +150,8 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const clarise = useClarise();
   const taskKey = pageIdOrTaskKey;
   const repoSlug = repoKey.toLowerCase();
 
@@ -212,7 +234,9 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     setError(null);
     try {
       const updated =
-        action.kind === "open_pull_request"
+        action.kind === "coding_assistant_run"
+          ? await startCodingAssistantRun(repoKey, task.key)
+          : action.kind === "open_pull_request"
           ? await openPullRequest(repoKey, task.key)
           : await refreshPullRequest(repoKey, task.key);
       setTask(updated);
@@ -263,6 +287,12 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       {error && (
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
           {error}
+        </div>
+      )}
+
+      {pending === "coding_assistant_run" && (
+        <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          The Coding Assistant is working on this task.
         </div>
       )}
 
@@ -326,6 +356,26 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
                   </button>
                 )
               ))}
+              {task.status === "paused" && task.pausedReason === "run_failed" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => bodyRef.current?.focus()}
+                    disabled={pending != null}
+                    className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Edit task brief
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => clarise.open()}
+                    disabled={pending != null}
+                    className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Ask Clarise what happened
+                  </button>
+                </>
+              )}
               <button
                 onClick={save}
                 disabled={!dirty || pending != null || !title.trim()}
@@ -336,6 +386,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
             </div>
 
             <textarea
+              ref={bodyRef}
               value={body}
               onChange={(event) => {
                 setBody(event.target.value);
@@ -357,6 +408,13 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 }
 
 function TaskMeta({ task }: { task: ServiceTask }) {
+  const handoffSummary = task.handoff?.summary ?? task.reviewSummary;
+  const handoffFiles =
+    task.handoff && task.handoff.filesChanged.length > 0
+      ? task.handoff.filesChanged
+      : task.filesChanged;
+  const nextReviewAction = task.handoff?.nextReviewAction ?? task.nextReviewAction;
+
   return (
     <div className="space-y-4">
       <Section title="Status">
@@ -385,20 +443,33 @@ function TaskMeta({ task }: { task: ServiceTask }) {
           <span>{task.assistant || "Not assigned"}</span>
         </div>
       </Section>
+      {task.run && (
+        <Section title="Run">
+          <div className="space-y-1 text-muted-foreground">
+            <p className="font-mono text-[11px]">{task.run.id}</p>
+            <p>{task.run.state}</p>
+          </div>
+        </Section>
+      )}
       <Section title="Review handoff">
-        {task.reviewSummary ? (
+        {handoffSummary ? (
           <div className="space-y-2">
-            <p className="text-muted-foreground">{task.reviewSummary}</p>
-            {task.filesChanged.length > 0 && (
+            <p className="text-muted-foreground">{handoffSummary}</p>
+            {handoffFiles.length > 0 && (
               <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
-                {task.filesChanged.map((file) => (
+                {handoffFiles.map((file) => (
                   <li key={file}>{file}</li>
                 ))}
               </ul>
             )}
-            {task.nextReviewAction && (
+            {task.handoff?.headBranch && (
+              <p className="font-mono text-[11px] text-muted-foreground">
+                {task.handoff.headBranch} → {task.handoff.baseBranch ?? "main"}
+              </p>
+            )}
+            {nextReviewAction && (
               <p className="text-[11px] text-muted-foreground">
-                Next: {task.nextReviewAction}
+                Next: {nextReviewAction}
               </p>
             )}
           </div>
@@ -461,37 +532,28 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "todo":
       return [
         {
-          label: "Start work",
-          kind: "event",
-          event: "start",
+          label: "Assign to Coding Assistant",
+          kind: "coding_assistant_run",
           icon: <Sparkles className="h-3.5 w-3.5" />,
           primary: true,
         },
       ];
     case "in_progress":
-      return [
-        {
-          label: "Submit for review",
-          kind: "event",
-          event: "submit_review",
-          icon: <Check className="h-3.5 w-3.5" />,
-          primary: true,
-        },
-        {
-          label: "Fail run",
-          kind: "event",
-          event: "fail_run",
-          icon: <XCircle className="h-3.5 w-3.5" />,
-        },
-      ];
+      return [];
     case "paused":
+      if (task.pausedReason !== "run_failed") return [];
       return [
         {
           label: "Retry with Coding Assistant",
-          kind: "event",
-          event: "start",
+          kind: "coding_assistant_run",
           icon: <RotateCcw className="h-3.5 w-3.5" />,
           primary: true,
+        },
+        {
+          label: "Cancel task",
+          kind: "event",
+          event: "cancel",
+          icon: <XCircle className="h-3.5 w-3.5" />,
         },
       ];
     case "in_review":

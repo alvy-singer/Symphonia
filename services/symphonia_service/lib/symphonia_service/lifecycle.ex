@@ -17,7 +17,15 @@ defmodule SymphoniaService.Lifecycle do
     {frontmatter, body} =
       case event do
         "start" ->
-          {frontmatter |> put_common(now) |> Map.put("status", "in_progress"), body}
+          frontmatter =
+            frontmatter
+            |> put_common(now)
+            |> Map.put("status", "in_progress")
+            |> Map.put("review_approved", false)
+            |> Map.delete("paused_reason")
+            |> Map.delete("paused_explanation")
+
+          {frontmatter, body}
 
         "submit_review" ->
           summary =

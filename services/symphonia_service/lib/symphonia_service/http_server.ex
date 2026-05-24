@@ -5,7 +5,7 @@ defmodule SymphoniaService.HTTPServer do
 
   use GenServer
 
-  alias SymphoniaService.{RepositoryRegistry, TaskStore, Workspace}
+  alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
 
   def start_link(opts) do
@@ -239,6 +239,11 @@ defmodule SymphoniaService.HTTPServer do
         params = Map.get(payload, "params", %{})
         task = TaskStore.apply_event(repository, task_key, event, params)
         {200, %{"task" => public_task(task)}}
+
+      ["api", "repositories", repo, "tasks", task_key, "coding-assistant", "runs"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        result = CodingAssistant.start_run(registry_path, repository, task_key, decode_json(body))
+        {201, %{"run" => result["run"], "task" => public_task(result["task"])}}
 
       ["api", "repositories", repo, "tasks", task_key, "open-pull-request"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)

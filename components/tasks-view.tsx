@@ -76,6 +76,24 @@ async function refreshPullRequest(repoKey: string, taskKey: string): Promise<Ser
   return payload.task;
 }
 
+async function startCodingAssistantRun(repoKey: string, taskKey: string): Promise<ServiceTask> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/coding-assistant/runs`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  const payload = (await res.json()) as { task?: ServiceTask; error?: string };
+  if (!res.ok || !payload.task) {
+    throw new Error(payload.error ?? "Could not start Coding Assistant");
+  }
+  return payload.task;
+}
+
 type TaskAction =
   | {
       label: string;
@@ -86,7 +104,7 @@ type TaskAction =
     }
   | {
       label: string;
-      kind: "open_pull_request" | "refresh_pr";
+      kind: "coding_assistant_run" | "open_pull_request" | "refresh_pr";
       primary?: boolean;
     }
   | {
@@ -325,7 +343,9 @@ export function TasksView({ repoKey }: { repoKey: string }) {
       const updated =
         action.kind === "event"
           ? await postTaskEvent(repoKey, task.key, action.event, eventParams)
-          : action.kind === "open_pull_request"
+          : action.kind === "coding_assistant_run"
+            ? await startCodingAssistantRun(repoKey, task.key)
+            : action.kind === "open_pull_request"
             ? await openPullRequest(repoKey, task.key)
             : await refreshPullRequest(repoKey, task.key);
       setTasks((current) => current.map((item) => (item.key === updated.key ? updated : item)));
@@ -562,7 +582,7 @@ function TaskActionBar({
               action.primary && "border-primary/30 bg-primary/5 text-foreground",
             )}
           >
-            {pending ? "Saving…" : action.label}
+            {pending ? "Working…" : action.label}
           </button>
         )
       ))}
@@ -573,14 +593,13 @@ function TaskActionBar({
 function actionsForTask(task: ServiceTask): TaskAction[] {
   switch (task.status) {
     case "todo":
-      return [{ label: "Start", kind: "event", event: "start", primary: true }];
+      return [{ label: "Assign", kind: "coding_assistant_run", primary: true }];
     case "in_progress":
-      return [
-        { label: "Submit review", kind: "event", event: "submit_review", primary: true },
-        { label: "Fail run", kind: "event", event: "fail_run" },
-      ];
+      return [];
     case "paused":
-      return [{ label: "Retry", kind: "event", event: "start", primary: true }];
+      return task.pausedReason === "run_failed"
+        ? [{ label: "Retry", kind: "coding_assistant_run", primary: true }]
+        : [];
     case "in_review":
       if (task.githubPrState === "open") {
         return [

@@ -125,6 +125,8 @@ defmodule SymphoniaService.TaskStore do
       "assistant" => frontmatter["assistant"],
       "pausedReason" => frontmatter["paused_reason"],
       "pausedExplanation" => frontmatter["paused_explanation"],
+      "run" => public_run(frontmatter["run"]),
+      "handoff" => public_handoff(frontmatter["handoff"]),
       "github" => public_github(github),
       "githubIssue" => github_issue["url"],
       "githubIssueState" => github_issue["state"],
@@ -313,6 +315,33 @@ defmodule SymphoniaService.TaskStore do
 
   defp public_github(github) when github == %{}, do: nil
   defp public_github(github), do: github
+
+  defp public_run(run) when is_map(run) do
+    %{
+      "id" => run["id"],
+      "state" => run["state"],
+      "startedAt" => run["started_at"],
+      "completedAt" => run["completed_at"]
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp public_run(_run), do: nil
+
+  defp public_handoff(handoff) when is_map(handoff) do
+    %{
+      "summary" => handoff["summary"],
+      "filesChanged" => List.wrap(handoff["files_changed"]) |> Enum.reject(&is_nil/1),
+      "nextReviewAction" => handoff["next_review_action"],
+      "headBranch" => handoff["head_branch"],
+      "baseBranch" => handoff["base_branch"]
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp public_handoff(_handoff), do: nil
 
   defp number_from_url(nil, _segment), do: nil
 

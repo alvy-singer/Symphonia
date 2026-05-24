@@ -23,6 +23,7 @@ defmodule SymphoniaService.Markdown do
     "paused_explanation",
     "review_state",
     "next_step",
+    "run",
     "handoff",
     "github",
     "github_issue",
@@ -65,6 +66,7 @@ defmodule SymphoniaService.Markdown do
   end
 
   @nested_orders %{
+    "run" => ["id", "state", "started_at", "completed_at"],
     "github" => ["repo", "issue", "pull_request"],
     "repo" => ["owner", "name", "url"],
     "issue" => ["owner", "repo", "number", "url", "state"],
@@ -78,7 +80,13 @@ defmodule SymphoniaService.Markdown do
       "head_branch",
       "base_branch"
     ],
-    "handoff" => ["head_branch"]
+    "handoff" => [
+      "summary",
+      "files_changed",
+      "next_review_action",
+      "head_branch",
+      "base_branch"
+    ]
   }
 
   defp parse_frontmatter(text) do
