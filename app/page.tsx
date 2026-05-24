@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import type { KeyboardEvent } from "react";
 import {
   Check,
   ChevronRight,
@@ -19,6 +21,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 export default function RepositoriesPage() {
+  const router = useRouter();
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const [githubRepositories, setGitHubRepositories] = useState<GitHubInstalledRepository[]>([]);
   const [query, setQuery] = useState("");
@@ -27,6 +30,7 @@ export default function RepositoriesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [githubConnection, setGitHubConnection] = useState<GitHubConnectionState | null>(null);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
+  const [openingGitHubRepo, setOpeningGitHubRepo] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -163,6 +167,39 @@ export default function RepositoriesPage() {
     }
   };
 
+  const openGitHubRepository = async (repository: GitHubInstalledRepository) => {
+    const fullName = repository.fullName || `${repository.owner}/${repository.name}`;
+    setOpeningGitHubRepo(fullName);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/github/repositories/workspace", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(repository),
+      });
+      const payload = (await res.json()) as {
+        repository?: RepositorySummary;
+        error?: string;
+      };
+
+      if (!res.ok || !payload.repository) {
+        throw new Error(payload.error ?? "Could not open repository workspace");
+      }
+
+      const openedRepository = payload.repository;
+      setRepositories((current) => {
+        const exists = current.some((repo) => repo.key === openedRepository.key);
+        return exists ? current : [...current, openedRepository];
+      });
+      router.push(`/r/${openedRepository.key.toLowerCase()}/tasks`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open repository workspace");
+    } finally {
+      setOpeningGitHubRepo(null);
+    }
+  };
+
   return (
     <div className="min-h-svh bg-background text-foreground">
       <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b bg-background/95 px-4 py-2.5 backdrop-blur">
@@ -264,7 +301,12 @@ export default function RepositoriesPage() {
                 <ul className="grid gap-3 sm:grid-cols-2">
                   {filteredGitHubRepositories.map((repo) => (
                     <li key={`${repo.installationId}-${repo.fullName ?? `${repo.owner}/${repo.name}`}`}>
-                      <GitHubRepositoryCard repository={repo} manageUrl={githubConnection?.manageUrl} />
+                      <GitHubRepositoryCard
+                        repository={repo}
+                        manageUrl={githubConnection?.manageUrl}
+                        opening={openingGitHubRepo === (repo.fullName || `${repo.owner}/${repo.name}`)}
+                        onOpen={openGitHubRepository}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -302,14 +344,37 @@ export default function RepositoriesPage() {
 function GitHubRepositoryCard({
   repository,
   manageUrl,
+  opening,
+  onOpen,
 }: {
   repository: GitHubInstalledRepository;
   manageUrl?: string;
+  opening: boolean;
+  onOpen: (repository: GitHubInstalledRepository) => void;
 }) {
   const fullName = repository.fullName || `${repository.owner}/${repository.name}`;
+  const openWorkspace = () => {
+    if (!opening) onOpen(repository);
+  };
+  const openFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openWorkspace();
+  };
 
   return (
-    <div className="rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20">
+    <div
+      role="link"
+      tabIndex={0}
+      aria-label={`Open ${fullName} workspace`}
+      aria-busy={opening}
+      onClick={openWorkspace}
+      onKeyDown={openFromKeyboard}
+      className={cn(
+        "group cursor-pointer rounded-lg border bg-card p-4 text-left transition-colors hover:border-foreground/20 focus:outline-none focus:ring-2 focus:ring-ring",
+        opening && "cursor-wait opacity-75",
+      )}
+    >
       <div className="flex items-center gap-3">
         <span className="grid h-9 w-9 place-items-center rounded-md bg-muted text-emerald-500">
           <Github className="h-4 w-4" />
@@ -321,34 +386,47 @@ function GitHubRepositoryCard({
             {repository.defaultBranch ? ` / ${repository.defaultBranch}` : ""}
           </p>
         </div>
-        {repository.url && (
-          <a
-            href={repository.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            Open
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-        )}
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
       </div>
 
       <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
-        <Stat label="Status" value="Connected" />
+        <Stat label="Status" value={opening ? "Opening" : "Connected"} />
         <Stat label="Account" value={repository.accountLogin ?? repository.owner} />
         <Stat label="Branch" value={repository.defaultBranch ?? "-"} />
       </dl>
 
-      {manageUrl && (
-        <a
-          href={manageUrl}
-          className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Change selection
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      )}
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          {opening ? "Opening workspace..." : "Open workspace"}
+          <ChevronRight className="h-3 w-3" />
+        </span>
+        <div className="flex items-center gap-3">
+          {repository.url && (
+            <a
+              href={repository.url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              GitHub
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+          {manageUrl && (
+            <a
+              href={manageUrl}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Repos
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -365,14 +443,17 @@ function RepositoryCard({
   const workspace = repository.workspace;
   const folders = workspace?.initialized ? "Present" : "Missing";
   const workflow = workspace?.workflow.exists ? "Present" : "Missing";
+  const href = `/r/${repository.key.toLowerCase()}/tasks`;
 
   return (
-    <div className="rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20">
+    <div className="group relative rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20">
+      <Link
+        href={href}
+        aria-label={`Open ${repository.name} workspace`}
+        className="absolute inset-0 z-10 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
+      />
       <div className="flex items-center gap-3">
-        <Link
-          href={`/r/${repository.key.toLowerCase()}/tasks`}
-          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <span
             className={cn(
               "grid h-9 w-9 place-items-center rounded-md bg-muted text-sm font-bold",
@@ -390,12 +471,12 @@ function RepositoryCard({
             </p>
           </div>
           <ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
-        </Link>
+        </div>
         <button
           type="button"
           onClick={() => onRemove(repository)}
           disabled={removing}
-          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] text-muted-foreground hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+          className="relative z-20 inline-flex h-8 shrink-0 items-center gap-1 rounded-md border bg-card px-2 text-[11px] text-muted-foreground hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={`Remove ${repository.name} from Symphonía`}
         >
           <Trash2 className="h-3.5 w-3.5" />

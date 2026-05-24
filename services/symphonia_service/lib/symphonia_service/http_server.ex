@@ -201,6 +201,12 @@ defmodule SymphoniaService.HTTPServer do
         github = Repositories.refresh_installations(decode_json(body))
         {200, %{"connection" => Auth.connection(), "github" => github}}
 
+      ["api", "github", "repositories", "workspace"] ->
+        repository = RepositoryRegistry.add_github(registry_path, decode_json(body))
+        Workspace.initialize(repository)
+        ensure_default_workflow(repository)
+        {200, %{"repository" => public_repository(repository)}}
+
       ["api", "repositories", repo, "workspace", "initialize"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         workspace = Workspace.initialize(repository)
@@ -302,6 +308,14 @@ defmodule SymphoniaService.HTTPServer do
   defp decode_json(body), do: JSON.decode!(body)
 
   defp public_tasks(tasks), do: Enum.map(tasks, &public_task/1)
+
+  defp ensure_default_workflow(repository) do
+    unless Workspace.workflow(repository)["exists"] do
+      Workspace.create_workflow_from_template(repository, "simple-pr")
+    end
+
+    :ok
+  end
 
   defp public_repository(repository) do
     workspace = Workspace.state(repository)

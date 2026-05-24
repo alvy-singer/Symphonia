@@ -60,4 +60,31 @@ defmodule SymphoniaService.RepositoryRegistryTest do
     assert RepositoryRegistry.list(registry_path) == []
     assert File.exists?(Path.join(repo_path, "README.md"))
   end
+
+  test "adds GitHub repositories as managed workspaces", %{registry_path: registry_path} do
+    repository =
+      RepositoryRegistry.add_github(registry_path, %{
+        "owner" => "agora-creations",
+        "name" => "symphonia",
+        "repoId" => 42,
+        "url" => "https://github.com/agora-creations/symphonia",
+        "cloneUrl" => "https://github.com/agora-creations/symphonia.git",
+        "defaultBranch" => "main",
+        "installationId" => 123
+      })
+
+    assert repository["key"] == "SYM"
+    assert repository["name"] == "agora-creations/symphonia"
+    assert repository["path"] =~ Path.join(["github-workspaces", "agora-creations", "symphonia"])
+    assert repository["github"]["owner"] == "agora-creations"
+    assert repository["github"]["name"] == "symphonia"
+    assert repository["github"]["repo_id"] == 42
+
+    assert RepositoryRegistry.add_github(registry_path, %{
+             "owner" => "Agora-Creations",
+             "name" => "Symphonia"
+           })["key"] == "SYM"
+
+    assert [_stored] = RepositoryRegistry.list(registry_path)
+  end
 end

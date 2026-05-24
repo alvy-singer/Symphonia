@@ -64,6 +64,45 @@ defmodule SymphoniaService.RepositoryRegistry do
     end
   end
 
+  def add_github(registry_path, attrs) when is_map(attrs) do
+    {owner, name} = github_owner_and_name!(attrs)
+    repositories = list(registry_path)
+
+    case Enum.find(repositories, &same_github_repo?(&1, owner, name)) do
+      nil ->
+        repo_path = github_workspace_path(registry_path, owner, name)
+        File.mkdir_p!(repo_path)
+        ensure_managed_git_repo(repo_path, github_clone_url(attrs, owner, name))
+
+        manual_key? = present?(Map.get(attrs, "key") || Map.get(attrs, :key))
+
+        requested_key =
+          Map.get(attrs, "key", Map.get(attrs, :key))
+          |> case do
+            value when is_binary(value) and value != "" -> normalize_key(value)
+            _ -> derive_key_from_name(name)
+          end
+
+        key = available_key!(repositories, requested_key, manual_key?)
+
+        repository =
+          %{
+            "key" => key,
+            "name" => github_full_name(attrs, owner, name),
+            "path" => repo_path,
+            "last_task_number" => 0,
+            "github" => github_attrs(attrs, owner, name)
+          }
+          |> normalize_repository()
+
+        save(registry_path, repositories ++ [repository])
+        repository
+
+      existing ->
+        existing
+    end
+  end
+
   def update(registry_path, key, fun) when is_function(fun, 1) do
     normalized_key = normalize_key(key)
     repositories = list(registry_path)
@@ -202,11 +241,143 @@ defmodule SymphoniaService.RepositoryRegistry do
   defp derive_key(repo_path) do
     repo_path
     |> Path.basename()
+    |> derive_key_from_name()
+  end
+
+  defp derive_key_from_name(name) do
+    name
     |> normalize_key()
     |> String.slice(0, 3)
     |> case do
       "" -> "REP"
       key -> key
+    end
+  end
+
+  defp github_owner_and_name!(attrs) do
+    owner = string_from_attrs(attrs, "owner") || string_from_attrs(attrs, "repoOwner")
+    name = string_from_attrs(attrs, "name") || string_from_attrs(attrs, "repo")
+
+    cond do
+      present?(owner) and present?(name) ->
+        {owner, name}
+
+      full_name = string_from_attrs(attrs, "fullName") ->
+        case String.split(full_name, "/", parts: 2) do
+          [full_owner, full_repo] when full_owner != "" and full_repo != "" ->
+            {full_owner, full_repo}
+
+          _ ->
+            raise ArgumentError, "GitHub repository is required."
+        end
+
+      true ->
+        raise ArgumentError, "GitHub repository is required."
+    end
+  end
+
+  defp github_workspace_path(registry_path, owner, name) do
+    root =
+      System.get_env("SYMPHONIA_GITHUB_WORKSPACES_ROOT") ||
+        Path.join(Path.dirname(registry_path), "github-workspaces")
+
+    Path.join([root, safe_path_part(owner), safe_path_part(name)])
+  end
+
+  defp safe_path_part(value) do
+    value
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9._-]/, "-")
+    |> case do
+      "" -> "repo"
+      part -> part
+    end
+  end
+
+  defp ensure_managed_git_repo(repo_path, clone_url) do
+    case System.find_executable("git") do
+      nil ->
+        File.mkdir_p!(Path.join(repo_path, ".git"))
+
+      _git ->
+        unless git_repository?(repo_path) do
+          System.cmd("git", ["-C", repo_path, "init"], stderr_to_stdout: true)
+        end
+
+        if present?(clone_url) do
+          case System.cmd("git", ["-C", repo_path, "remote", "get-url", "origin"],
+                 stderr_to_stdout: true
+               ) do
+            {_output, 0} ->
+              System.cmd("git", ["-C", repo_path, "remote", "set-url", "origin", clone_url],
+                stderr_to_stdout: true
+              )
+
+            _ ->
+              System.cmd("git", ["-C", repo_path, "remote", "add", "origin", clone_url],
+                stderr_to_stdout: true
+              )
+          end
+        end
+    end
+
+    :ok
+  rescue
+    _ ->
+      File.mkdir_p!(Path.join(repo_path, ".git"))
+      :ok
+  end
+
+  defp github_attrs(attrs, owner, name) do
+    %{
+      "owner" => owner,
+      "name" => name,
+      "repo_id" =>
+        Map.get(attrs, "repoId") || Map.get(attrs, "repo_id") || Map.get(attrs, :repo_id),
+      "url" => string_from_attrs(attrs, "url") || "https://github.com/#{owner}/#{name}",
+      "clone_url" => github_clone_url(attrs, owner, name),
+      "default_branch" =>
+        string_from_attrs(attrs, "defaultBranch") || string_from_attrs(attrs, "default_branch"),
+      "installation_id" =>
+        Map.get(attrs, "installationId") ||
+          Map.get(attrs, "installation_id") ||
+          Map.get(attrs, :installation_id),
+      "auth_mode" => "app_installation",
+      "linked_at" => now()
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp github_clone_url(attrs, owner, name) do
+    string_from_attrs(attrs, "cloneUrl") ||
+      string_from_attrs(attrs, "clone_url") ||
+      "https://github.com/#{owner}/#{name}.git"
+  end
+
+  defp github_full_name(attrs, owner, name) do
+    string_from_attrs(attrs, "fullName") || "#{owner}/#{name}"
+  end
+
+  defp same_github_repo?(repository, owner, name) do
+    case repository["github"] do
+      github when is_map(github) ->
+        String.downcase(to_string(github["owner"])) == String.downcase(owner) and
+          String.downcase(to_string(github["name"])) == String.downcase(name)
+
+      _ ->
+        false
+    end
+  end
+
+  defp string_from_attrs(attrs, key) do
+    case Map.get(attrs, key) || Map.get(attrs, String.to_atom(key)) do
+      value when is_binary(value) ->
+        value = String.trim(value)
+        if value == "", do: nil, else: value
+
+      _ ->
+        nil
     end
   end
 
@@ -243,4 +414,6 @@ defmodule SymphoniaService.RepositoryRegistry do
   defp same_path?(left, right), do: Path.expand(left) == Path.expand(right)
 
   defp present?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 end
