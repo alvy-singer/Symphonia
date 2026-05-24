@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -27,6 +28,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning className="dark bg-background">
       <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider>{children}</ThemeProvider>
+        <SpeedInsights />
       </body>
     </html>
   );
