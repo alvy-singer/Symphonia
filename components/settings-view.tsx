@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/theme-provider";
 import {
@@ -8,6 +8,10 @@ import {
   type ExternalIssue,
   type ImportSource,
 } from "@/data/mock";
+import type {
+  GitHubConnectionState,
+  RepositoryGitHubState,
+} from "@/lib/repository-model";
 import {
   User as UserIcon,
   Bell,
@@ -245,14 +249,9 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
           {active === "integrations" && (
             <Section
               title="Integrations"
-              description="Connect Symphonia to the tools your team already uses. Imports from GitHub and Linear are managed inside each integration."
+              description="Connect Symphonia to the tools your team already uses."
             >
-              <IntegrationRow
-                source="github"
-                name="GitHub"
-                desc="Sync pull requests, commits, and issues to tasks."
-                repoKey={repoKey}
-              />
+              <GitHubIntegration repoKey={repoKey} />
               <IntegrationRow
                 source="linear"
                 name="Linear"
@@ -313,6 +312,240 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
             </Section>
           )}
         </main>
+      </div>
+    </div>
+  );
+}
+
+interface DeviceFlowState {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  interval: number;
+  expiresIn: number;
+}
+
+async function fetchGitHubConnection(): Promise<GitHubConnectionState> {
+  const res = await fetch("/api/github/connection", { cache: "no-store" });
+  const payload = (await res.json()) as { connection?: GitHubConnectionState; error?: string };
+  if (!res.ok || !payload.connection) throw new Error(payload.error ?? "Could not load GitHub connection");
+  return payload.connection;
+}
+
+async function fetchRepositoryGitHub(repoKey: string): Promise<RepositoryGitHubState> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/github`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { github?: RepositoryGitHubState; error?: string };
+  if (!res.ok || !payload.github) throw new Error(payload.error ?? "Could not load GitHub repository state");
+  return payload.github;
+}
+
+function GitHubIntegration({ repoKey }: { repoKey: string }) {
+  const [connection, setConnection] = useState<GitHubConnectionState | null>(null);
+  const [repoState, setRepoState] = useState<RepositoryGitHubState | null>(null);
+  const [device, setDevice] = useState<DeviceFlowState | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchGitHubConnection(), fetchRepositoryGitHub(repoKey)])
+      .then(([nextConnection, nextRepoState]) => {
+        if (cancelled) return;
+        setConnection(nextConnection);
+        setRepoState(nextRepoState);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load GitHub");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repoKey]);
+
+  useEffect(() => {
+    if (!device) return;
+    const timer = window.setTimeout(() => {
+      void pollDevice(device);
+    }, Math.max(device.interval, 1) * 1000);
+    return () => window.clearTimeout(timer);
+  }, [device]);
+
+  const startConnection = async () => {
+    setPending("connect");
+    setError(null);
+    try {
+      const res = await fetch("/api/github/connect/start", { method: "POST" });
+      const payload = (await res.json()) as DeviceFlowState & { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "Could not start GitHub connection");
+      setDevice(payload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start GitHub connection");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const pollDevice = async (current: DeviceFlowState) => {
+    setPending("poll");
+    setError(null);
+    try {
+      const res = await fetch("/api/github/connect/poll", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          deviceCode: current.deviceCode,
+          interval: current.interval,
+        }),
+      });
+      const payload = (await res.json()) as {
+        connection?: GitHubConnectionState;
+        status?: string;
+        interval?: number;
+        retryAfter?: number;
+        error?: string;
+      };
+
+      if (res.status === 202) {
+        setDevice({ ...current, interval: payload.interval ?? current.interval });
+        return;
+      }
+
+      if (res.status === 429) {
+        setDevice({ ...current, interval: payload.retryAfter ?? current.interval });
+        return;
+      }
+
+      if (!res.ok || !payload.connection) {
+        throw new Error(payload.error ?? "Could not connect GitHub");
+      }
+
+      setConnection(payload.connection);
+      setDevice(null);
+      setRepoState(await fetchRepositoryGitHub(repoKey));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not connect GitHub");
+      setDevice(null);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const linkLocalRepo = async () => {
+    setPending("link");
+    setError(null);
+    try {
+      const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/github/link`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const payload = (await res.json()) as { github?: RepositoryGitHubState; error?: string };
+      if (!res.ok || !payload.github) throw new Error(payload.error ?? "Could not link GitHub repo");
+      setRepoState((current) => ({
+        connection: current?.connection ?? connection ?? { connected: false },
+        detectedRemote: payload.github?.detectedRemote ?? current?.detectedRemote,
+        link: payload.github?.link ?? null,
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not link GitHub repo");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const connected = connection?.connected;
+  const link = repoState?.link;
+  const detected = repoState?.detectedRemote;
+
+  return (
+    <div className="rounded-md border">
+      <div className="flex items-start justify-between gap-3 p-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-foreground">
+            <Github className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-medium">GitHub</div>
+            <div className="text-xs text-muted-foreground">
+              Open pull requests and update linked issues for this repository.
+            </div>
+            {detected && (
+              <div className="mt-2 text-[11px] text-muted-foreground">
+                GitHub remote detected:{" "}
+                <span className="font-mono">
+                  {detected.owner}/{detected.name}
+                </span>
+              </div>
+            )}
+            {link && (
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                Linked local repo:{" "}
+                <a
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono hover:text-foreground"
+                >
+                  {link.owner}/{link.name}
+                </a>
+              </div>
+            )}
+            {device && (
+              <div className="mt-3 rounded-md border bg-muted/30 p-3 text-xs">
+                <div className="font-medium">Authorize Symphonia on GitHub</div>
+                <div className="mt-1 text-muted-foreground">
+                  Enter code <span className="font-mono text-foreground">{device.userCode}</span>
+                </div>
+                <a
+                  href={device.verificationUri}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 hover:bg-muted"
+                >
+                  Open GitHub <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            )}
+            {error && (
+              <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">{error}</div>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {connected ? (
+            <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+              <Check className="h-3 w-3" />
+              {connection?.user?.login ?? "Connected"}
+            </span>
+          ) : (
+            <button
+              onClick={startConnection}
+              disabled={pending != null}
+              className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pending === "connect" ? "Connecting…" : "Connect GitHub"}
+            </button>
+          )}
+          {connection?.installationUrl && (
+            <a
+              href={connection.installationUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
+            >
+              Install Symphonia
+            </a>
+          )}
+          <button
+            onClick={linkLocalRepo}
+            disabled={!connected || pending != null}
+            className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {pending === "link" ? "Linking…" : link ? "Relink local repo" : "Link local repo"}
+          </button>
+        </div>
       </div>
     </div>
   );

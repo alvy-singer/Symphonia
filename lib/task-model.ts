@@ -25,6 +25,32 @@ export type TaskLifecycleEvent =
   | "merge_pr"
   | "cancel";
 
+export interface GitHubTaskMetadata {
+  repo?: {
+    owner?: string;
+    name?: string;
+    url?: string;
+    default_branch?: string;
+  };
+  issue?: {
+    owner?: string;
+    repo?: string;
+    number?: number;
+    url?: string;
+    state?: string;
+  };
+  pull_request?: {
+    owner?: string;
+    repo?: string;
+    number?: number;
+    url?: string;
+    state?: "open" | "closed" | "merged" | string;
+    merged?: boolean;
+    head_branch?: string;
+    base_branch?: string;
+  };
+}
+
 export interface ServiceTask {
   key: string;
   title: string;
@@ -34,14 +60,17 @@ export interface ServiceTask {
   assistant?: string;
   pausedReason?: PausedReason;
   pausedExplanation?: string;
+  github?: GitHubTaskMetadata | null;
   githubIssue?: string;
   githubIssueState?: string;
   githubPr?: string;
   githubPrState?: "open" | "merged" | string;
   githubSyncEnabled?: boolean;
   reviewApproved?: boolean;
+  reviewState?: "approved" | "changes_requested" | string;
   reviewSummary?: string;
   filesChanged: string[];
+  nextStep?: "open_pull_request" | "refresh_pr_status" | string;
   nextReviewAction?: string;
   updatedAt?: string;
   repo: string;
@@ -84,4 +113,3 @@ export function statusLabel(status: TaskStatus): string {
 export function pausedReasonLabel(reason?: PausedReason): string | undefined {
   return reason ? PAUSED_REASON_LABELS[reason] : undefined;
 }
-

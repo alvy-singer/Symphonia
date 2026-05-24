@@ -56,6 +56,45 @@ async function postTaskEvent(
   return payload.task;
 }
 
+async function openPullRequest(repoKey: string, taskKey: string): Promise<ServiceTask> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(taskKey)}/open-pull-request`,
+    { method: "POST" },
+  );
+  const payload = (await res.json()) as { task?: ServiceTask; error?: string };
+  if (!res.ok || !payload.task) throw new Error(payload.error ?? "Could not open pull request");
+  return payload.task;
+}
+
+async function refreshPullRequest(repoKey: string, taskKey: string): Promise<ServiceTask> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(taskKey)}/refresh-pr`,
+    { method: "POST" },
+  );
+  const payload = (await res.json()) as { task?: ServiceTask; error?: string };
+  if (!res.ok || !payload.task) throw new Error(payload.error ?? "Could not refresh pull request");
+  return payload.task;
+}
+
+type TaskAction =
+  | {
+      label: string;
+      kind: "event";
+      event: TaskLifecycleEvent;
+      primary?: boolean;
+      params?: Record<string, unknown>;
+    }
+  | {
+      label: string;
+      kind: "open_pull_request" | "refresh_pr";
+      primary?: boolean;
+    }
+  | {
+      label: string;
+      kind: "view_pr";
+      href: string;
+    };
+
 function TaskCard({
   task,
   repoSlug,
@@ -66,8 +105,7 @@ function TaskCard({
   repoSlug: string;
   onEvent: (
     task: ServiceTask,
-    event: TaskLifecycleEvent,
-    params?: Record<string, unknown>,
+    action: TaskAction,
   ) => void;
   pending: boolean;
 }) {
@@ -117,8 +155,7 @@ function TaskRow({
   repoSlug: string;
   onEvent: (
     task: ServiceTask,
-    event: TaskLifecycleEvent,
-    params?: Record<string, unknown>,
+    action: TaskAction,
   ) => void;
   pending: boolean;
 }) {
@@ -273,18 +310,24 @@ export function TasksView({ repoKey }: { repoKey: string }) {
 
   const onEvent = async (
     task: ServiceTask,
-    event: TaskLifecycleEvent,
-    params?: Record<string, unknown>,
+    action: TaskAction,
   ) => {
-    let eventParams = params;
-    if (event === "request_changes" && !eventParams?.feedback) {
+    if (action.kind === "view_pr") return;
+
+    let eventParams = action.kind === "event" ? action.params : undefined;
+    if (action.kind === "event" && action.event === "request_changes" && !eventParams?.feedback) {
       const feedback = window.prompt("What should the Coding Assistant fix?");
       if (!feedback) return;
       eventParams = { feedback };
     }
     setPendingKey(task.key);
     try {
-      const updated = await postTaskEvent(repoKey, task.key, event, eventParams);
+      const updated =
+        action.kind === "event"
+          ? await postTaskEvent(repoKey, task.key, action.event, eventParams)
+          : action.kind === "open_pull_request"
+            ? await openPullRequest(repoKey, task.key)
+            : await refreshPullRequest(repoKey, task.key);
       setTasks((current) => current.map((item) => (item.key === updated.key ? updated : item)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update task");
@@ -488,8 +531,7 @@ function TaskActionBar({
   task: ServiceTask;
   onEvent: (
     task: ServiceTask,
-    event: TaskLifecycleEvent,
-    params?: Record<string, unknown>,
+    action: TaskAction,
   ) => void;
   pending: boolean;
   compact?: boolean;
@@ -500,48 +542,58 @@ function TaskActionBar({
   return (
     <div className={cn("flex flex-wrap gap-1", compact ? "mt-2" : "")}>
       {actions.map((action) => (
-        <button
-          key={action.event}
-          onClick={() => onEvent(task, action.event, action.params)}
-          disabled={pending}
-          className={cn(
-            "rounded-md border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50",
-            action.primary && "border-primary/30 bg-primary/5 text-foreground",
-          )}
-        >
-          {pending ? "Saving…" : action.label}
-        </button>
+        action.kind === "view_pr" ? (
+          <a
+            key={action.kind}
+            href={action.href}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-md border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {action.label}
+          </a>
+        ) : (
+          <button
+            key={action.kind === "event" ? action.event : action.kind}
+            onClick={() => onEvent(task, action)}
+            disabled={pending}
+            className={cn(
+              "rounded-md border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50",
+              action.primary && "border-primary/30 bg-primary/5 text-foreground",
+            )}
+          >
+            {pending ? "Saving…" : action.label}
+          </button>
+        )
       ))}
     </div>
   );
 }
 
-function actionsForTask(task: ServiceTask): {
-  label: string;
-  event: TaskLifecycleEvent;
-  primary?: boolean;
-  params?: Record<string, unknown>;
-}[] {
+function actionsForTask(task: ServiceTask): TaskAction[] {
   switch (task.status) {
     case "todo":
-      return [{ label: "Start", event: "start", primary: true }];
+      return [{ label: "Start", kind: "event", event: "start", primary: true }];
     case "in_progress":
       return [
-        { label: "Submit review", event: "submit_review", primary: true },
-        { label: "Fail run", event: "fail_run" },
+        { label: "Submit review", kind: "event", event: "submit_review", primary: true },
+        { label: "Fail run", kind: "event", event: "fail_run" },
       ];
     case "paused":
-      return [{ label: "Retry", event: "start", primary: true }];
+      return [{ label: "Retry", kind: "event", event: "start", primary: true }];
     case "in_review":
       if (task.githubPrState === "open") {
-        return [{ label: "PR merged", event: "merge_pr", primary: true }];
+        return [
+          ...(task.githubPr ? [{ label: "View PR", kind: "view_pr" as const, href: task.githubPr }] : []),
+          { label: "Refresh PR", kind: "refresh_pr", primary: true },
+        ];
       }
       if (task.reviewApproved) {
-        return [{ label: "Open PR", event: "open_pr", primary: true }];
+        return [{ label: "Open PR", kind: "open_pull_request", primary: true }];
       }
       return [
-        { label: "Approve", event: "approve", primary: true },
-        { label: "Request changes", event: "request_changes" },
+        { label: "Approve", kind: "event", event: "approve", primary: true },
+        { label: "Request changes", kind: "event", event: "request_changes" },
       ];
     case "completed":
     case "canceled":

@@ -71,15 +71,18 @@ defmodule SymphoniaService.Lifecycle do
             frontmatter
             |> put_common(now)
             |> Map.put("review_approved", true)
+            |> Map.put("review_state", "approved")
 
           frontmatter =
             if requires_pr do
               frontmatter
               |> Map.put("status", "in_review")
+              |> Map.put("next_step", "open_pull_request")
               |> Map.put("next_review_action", "Open pull request.")
             else
               frontmatter
               |> Map.put("status", "completed")
+              |> Map.put("next_step", nil)
               |> Map.put("next_review_action", nil)
             end
 
@@ -95,6 +98,8 @@ defmodule SymphoniaService.Lifecycle do
             |> Map.merge(%{
               "status" => "in_progress",
               "review_approved" => false,
+              "review_state" => "changes_requested",
+              "next_step" => nil,
               "next_review_action" => "Coding Assistant is continuing with requested changes."
             })
 
@@ -113,6 +118,7 @@ defmodule SymphoniaService.Lifecycle do
               "status" => "in_review",
               "github_pr" => pr_url,
               "github_pr_state" => "open",
+              "next_step" => "refresh_pr_status",
               "next_review_action" => "Wait for pull request merge."
             })
 
@@ -125,11 +131,13 @@ defmodule SymphoniaService.Lifecycle do
             |> Map.merge(%{
               "status" => "completed",
               "github_pr_state" => "merged",
+              "next_step" => nil,
               "next_review_action" => nil
             })
             |> maybe_close_github_issue()
 
-          {frontmatter, append_timeline(body, "Pull request merged. Linked GitHub issue updated.", now)}
+          {frontmatter,
+           append_timeline(body, "Pull request merged. Linked GitHub issue updated.", now)}
 
         "cancel" ->
           {frontmatter |> put_common(now) |> Map.put("status", "canceled"), body}

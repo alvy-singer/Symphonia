@@ -74,6 +74,48 @@ async function postTaskEvent(
   return data.task;
 }
 
+async function openPullRequest(repoKey: string, taskKey: string): Promise<ServiceTask> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(taskKey)}/open-pull-request`,
+    { method: "POST" },
+  );
+  const data = (await res.json()) as { task?: ServiceTask; error?: string };
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not open pull request");
+  return data.task;
+}
+
+async function refreshPullRequest(repoKey: string, taskKey: string): Promise<ServiceTask> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(taskKey)}/refresh-pr`,
+    { method: "POST" },
+  );
+  const data = (await res.json()) as { task?: ServiceTask; error?: string };
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not refresh pull request");
+  return data.task;
+}
+
+type TaskAction =
+  | {
+      label: string;
+      kind: "event";
+      event: TaskLifecycleEvent;
+      icon: React.ReactNode;
+      primary?: boolean;
+      params?: Record<string, unknown>;
+    }
+  | {
+      label: string;
+      kind: "open_pull_request" | "refresh_pr";
+      icon: React.ReactNode;
+      primary?: boolean;
+    }
+  | {
+      label: string;
+      kind: "view_pr";
+      icon: React.ReactNode;
+      href: string;
+    };
+
 /**
  * Filesystem-backed task page.
  *
@@ -145,6 +187,34 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     setError(null);
     try {
       const updated = await postTaskEvent(repoKey, task.key, event, nextParams);
+      setTask(updated);
+      setTitle(updated.title);
+      setBody(updated.body);
+      setDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update task");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const runAction = async (action: TaskAction) => {
+    if (!task) return;
+
+    if (action.kind === "event") {
+      await runEvent(action.event, action.params);
+      return;
+    }
+
+    if (action.kind === "view_pr") return;
+
+    setPending(action.kind);
+    setError(null);
+    try {
+      const updated =
+        action.kind === "open_pull_request"
+          ? await openPullRequest(repoKey, task.key)
+          : await refreshPullRequest(repoKey, task.key);
       setTask(updated);
       setTitle(updated.title);
       setBody(updated.body);
@@ -228,18 +298,33 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 
             <div className="mt-3 flex flex-wrap items-center gap-2 border-y py-2">
               {availableActions.map((action) => (
-                <button
-                  key={action.event}
-                  onClick={() => runEvent(action.event, action.params)}
-                  disabled={pending != null}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
-                    action.primary && "bg-primary text-primary-foreground hover:opacity-90",
-                  )}
-                >
-                  {action.icon}
-                  {pending === action.event ? "Working…" : action.label}
-                </button>
+                action.kind === "view_pr" ? (
+                  <a
+                    key={action.kind}
+                    href={action.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
+                  >
+                    {action.icon}
+                    {action.label}
+                  </a>
+                ) : (
+                  <button
+                    key={action.kind === "event" ? action.event : action.kind}
+                    onClick={() => runAction(action)}
+                    disabled={pending != null}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
+                      action.primary && "bg-primary text-primary-foreground hover:opacity-90",
+                    )}
+                  >
+                    {action.icon}
+                    {pending === (action.kind === "event" ? action.event : action.kind)
+                      ? "Working…"
+                      : action.label}
+                  </button>
+                )
               ))}
               <button
                 onClick={save}
@@ -371,18 +456,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function actionsForTask(task: ServiceTask): {
-  label: string;
-  event: TaskLifecycleEvent;
-  icon: React.ReactNode;
-  primary?: boolean;
-  params?: Record<string, unknown>;
-}[] {
+function actionsForTask(task: ServiceTask): TaskAction[] {
   switch (task.status) {
     case "todo":
       return [
         {
           label: "Start work",
+          kind: "event",
           event: "start",
           icon: <Sparkles className="h-3.5 w-3.5" />,
           primary: true,
@@ -392,12 +472,14 @@ function actionsForTask(task: ServiceTask): {
       return [
         {
           label: "Submit for review",
+          kind: "event",
           event: "submit_review",
           icon: <Check className="h-3.5 w-3.5" />,
           primary: true,
         },
         {
           label: "Fail run",
+          kind: "event",
           event: "fail_run",
           icon: <XCircle className="h-3.5 w-3.5" />,
         },
@@ -406,6 +488,7 @@ function actionsForTask(task: ServiceTask): {
       return [
         {
           label: "Retry with Coding Assistant",
+          kind: "event",
           event: "start",
           icon: <RotateCcw className="h-3.5 w-3.5" />,
           primary: true,
@@ -414,9 +497,19 @@ function actionsForTask(task: ServiceTask): {
     case "in_review":
       if (task.githubPrState === "open") {
         return [
+          ...(task.githubPr
+            ? [
+                {
+                  label: "View Pull Request",
+                  kind: "view_pr" as const,
+                  href: task.githubPr,
+                  icon: <ExternalLink className="h-3.5 w-3.5" />,
+                },
+              ]
+            : []),
           {
-            label: "PR merged",
-            event: "merge_pr",
+            label: "Refresh PR Status",
+            kind: "refresh_pr",
             icon: <GitPullRequest className="h-3.5 w-3.5" />,
             primary: true,
           },
@@ -426,7 +519,7 @@ function actionsForTask(task: ServiceTask): {
         return [
           {
             label: "Open Pull Request",
-            event: "open_pr",
+            kind: "open_pull_request",
             icon: <GitPullRequest className="h-3.5 w-3.5" />,
             primary: true,
           },
@@ -435,12 +528,14 @@ function actionsForTask(task: ServiceTask): {
       return [
         {
           label: "Approve",
+          kind: "event",
           event: "approve",
           icon: <Check className="h-3.5 w-3.5" />,
           primary: true,
         },
         {
           label: "Request changes",
+          kind: "event",
           event: "request_changes",
           icon: <RotateCcw className="h-3.5 w-3.5" />,
         },

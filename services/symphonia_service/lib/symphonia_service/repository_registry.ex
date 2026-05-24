@@ -196,12 +196,17 @@ defmodule SymphoniaService.RepositoryRegistry do
   end
 
   defp normalize_repository(repository) do
-    %{
+    normalized = %{
       "key" => normalize_key(repository["key"]),
       "name" => repository["name"] || Path.basename(repository["path"] || ""),
       "path" => Path.expand(repository["path"]),
       "last_task_number" => integer(repository["last_task_number"])
     }
+
+    case repository["github"] do
+      github when is_map(github) -> Map.put(normalized, "github", github)
+      _ -> normalized
+    end
   end
 
   defp normalize_key(value) when is_binary(value) do

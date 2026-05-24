@@ -112,6 +112,9 @@ defmodule SymphoniaService.TaskStore do
   defp read_task_file(repository, path) do
     parsed = path |> File.read!() |> Markdown.parse()
     frontmatter = parsed.frontmatter
+    github = github_metadata(frontmatter)
+    github_issue = github["issue"] || %{}
+    github_pr = github["pull_request"] || %{}
 
     %{
       "key" => frontmatter["key"],
@@ -122,14 +125,17 @@ defmodule SymphoniaService.TaskStore do
       "assistant" => frontmatter["assistant"],
       "pausedReason" => frontmatter["paused_reason"],
       "pausedExplanation" => frontmatter["paused_explanation"],
-      "githubIssue" => frontmatter["github_issue"],
-      "githubIssueState" => frontmatter["github_issue_state"],
-      "githubPr" => frontmatter["github_pr"],
-      "githubPrState" => frontmatter["github_pr_state"],
+      "github" => public_github(github),
+      "githubIssue" => github_issue["url"],
+      "githubIssueState" => github_issue["state"],
+      "githubPr" => github_pr["url"],
+      "githubPrState" => github_pr["state"],
       "githubSyncEnabled" => truthy?(frontmatter["github_sync_enabled"]),
       "reviewApproved" => truthy?(frontmatter["review_approved"]),
+      "reviewState" => frontmatter["review_state"],
       "reviewSummary" => frontmatter["review_summary"],
       "filesChanged" => List.wrap(frontmatter["files_changed"]) |> Enum.reject(&is_nil/1),
+      "nextStep" => frontmatter["next_step"],
       "nextReviewAction" => frontmatter["next_review_action"],
       "updatedAt" => frontmatter["updated_at"],
       "repo" => repository["key"],
@@ -257,6 +263,65 @@ defmodule SymphoniaService.TaskStore do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp github_metadata(frontmatter) do
+    github =
+      case frontmatter["github"] do
+        value when is_map(value) -> value
+        _ -> %{}
+      end
+
+    github
+    |> put_legacy_issue(frontmatter)
+    |> put_legacy_pr(frontmatter)
+  end
+
+  defp put_legacy_issue(github, frontmatter) do
+    cond do
+      is_map(github["issue"]) ->
+        github
+
+      is_binary(frontmatter["github_issue"]) and frontmatter["github_issue"] != "" ->
+        Map.put(github, "issue", %{
+          "url" => frontmatter["github_issue"],
+          "state" => frontmatter["github_issue_state"],
+          "number" => number_from_url(frontmatter["github_issue"], "issues")
+        })
+
+      true ->
+        github
+    end
+  end
+
+  defp put_legacy_pr(github, frontmatter) do
+    cond do
+      is_map(github["pull_request"]) ->
+        github
+
+      is_binary(frontmatter["github_pr"]) and frontmatter["github_pr"] != "" ->
+        Map.put(github, "pull_request", %{
+          "url" => frontmatter["github_pr"],
+          "state" => frontmatter["github_pr_state"],
+          "merged" => frontmatter["github_pr_state"] == "merged",
+          "number" => number_from_url(frontmatter["github_pr"], "pull")
+        })
+
+      true ->
+        github
+    end
+  end
+
+  defp public_github(github) when github == %{}, do: nil
+  defp public_github(github), do: github
+
+  defp number_from_url(nil, _segment), do: nil
+
+  defp number_from_url(url, segment) do
+    case Regex.run(~r/#{segment}\/(\d+)/, url) do
+      [_all, number] -> String.to_integer(number)
+      _ -> nil
+    end
+  end
 
   defp truthy?(true), do: true
   defp truthy?("true"), do: true

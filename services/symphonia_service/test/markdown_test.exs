@@ -44,4 +44,39 @@ defmodule SymphoniaService.MarkdownTest do
     assert text =~ "files_changed:\n  - a.ts"
     assert text =~ "# Serialize task"
   end
+
+  test "parses and serializes nested GitHub metadata" do
+    parsed =
+      Markdown.parse("""
+      ---
+      key: SYM-3
+      title: Nested GitHub
+      github:
+        repo:
+          owner: agora-creations
+          name: symphonia
+        issue:
+          number: 123
+          state: open
+        pull_request:
+          number: 456
+          state: open
+          merged: false
+          head_branch: task-branch
+          base_branch: main
+      ---
+
+      # Nested GitHub
+      """)
+
+    assert parsed.frontmatter["github"]["repo"]["owner"] == "agora-creations"
+    assert parsed.frontmatter["github"]["issue"]["number"] == 123
+    assert parsed.frontmatter["github"]["pull_request"]["merged"] == false
+
+    rendered = Markdown.serialize(parsed.frontmatter, parsed.body)
+
+    assert rendered =~ "github:\n  repo:\n    owner: agora-creations"
+    assert rendered =~ "pull_request:\n    number: 456"
+    assert rendered =~ "head_branch: task-branch"
+  end
 end

@@ -6,6 +6,7 @@ defmodule SymphoniaService.HTTPServer do
   use GenServer
 
   alias SymphoniaService.{RepositoryRegistry, TaskStore, Workspace}
+  alias SymphoniaService.GitHub.{Auth, PullRequests, RepositoryLink, Sync}
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -70,6 +71,16 @@ defmodule SymphoniaService.HTTPServer do
     {200, %{"repositories" => repositories}}
   end
 
+  defp route(%{method: "GET", path: "/api/github/connection"}, _registry_path) do
+    {200, %{"connection" => Auth.connection()}}
+  end
+
+  defp route(%{method: "GET", path: "/api/github/repositories"}, _registry_path) do
+    {200, RepositoryLink.accessible_repositories()}
+  rescue
+    error -> {400, %{"error" => Exception.message(error)}}
+  end
+
   defp route(%{method: "POST", path: "/api/repositories", body: body}, registry_path) do
     repository = registry_path |> RepositoryRegistry.add(decode_json(body)) |> public_repository()
     {201, %{"repository" => repository}}
@@ -82,6 +93,10 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "repositories", repo, "workspace"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "workspace" => Workspace.state(repository)}}
+
+      ["api", "repositories", repo, "github"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"repo" => repository["key"], "github" => RepositoryLink.state(repository)}}
 
       ["api", "repositories", repo, "workflow"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -129,10 +144,47 @@ defmodule SymphoniaService.HTTPServer do
 
   defp route(%{method: "POST", path: path, body: body}, registry_path) do
     case path_parts(path) do
+      ["api", "github", "connect", "start"] ->
+        case Auth.start_device_flow() do
+          {:ok, payload} ->
+            {200, payload}
+
+          {:error, payload} ->
+            {400,
+             %{
+               "error" => payload["message"] || "Could not start GitHub connection.",
+               "githubError" => payload
+             }}
+        end
+
+      ["api", "github", "connect", "poll"] ->
+        case Auth.poll_device_flow(decode_json(body)) do
+          {:ok, connection} ->
+            {200, %{"connection" => connection}}
+
+          {:pending, payload} ->
+            {202, payload}
+
+          {:error, status, payload} ->
+            {status, payload}
+
+          {:error, payload} ->
+            {400,
+             %{
+               "error" => payload["message"] || "Could not connect GitHub.",
+               "githubError" => payload
+             }}
+        end
+
       ["api", "repositories", repo, "workspace", "initialize"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         workspace = Workspace.initialize(repository)
         {200, %{"repo" => repository["key"], "workspace" => workspace}}
+
+      ["api", "repositories", repo, "github", "link"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        github = RepositoryLink.link(registry_path, repository, decode_json(body))
+        {200, %{"repo" => repository["key"], "github" => github}}
 
       ["api", "repositories", repo, "workflow", "from-template"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -155,6 +207,16 @@ defmodule SymphoniaService.HTTPServer do
         event = Map.fetch!(payload, "event")
         params = Map.get(payload, "params", %{})
         task = TaskStore.apply_event(repository, task_key, event, params)
+        {200, %{"task" => public_task(task)}}
+
+      ["api", "repositories", repo, "tasks", task_key, "open-pull-request"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        task = PullRequests.open_from_task(repository, task_key)
+        {200, %{"task" => public_task(task)}}
+
+      ["api", "repositories", repo, "tasks", task_key, "refresh-pr"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        task = Sync.refresh_pull_request(repository, task_key)
         {200, %{"task" => public_task(task)}}
 
       _ ->
@@ -195,10 +257,13 @@ defmodule SymphoniaService.HTTPServer do
 
   defp reason(200), do: "OK"
   defp reason(201), do: "Created"
+  defp reason(202), do: "Accepted"
   defp reason(204), do: "No Content"
   defp reason(400), do: "Bad Request"
   defp reason(404), do: "Not Found"
   defp reason(405), do: "Method Not Allowed"
+  defp reason(429), do: "Too Many Requests"
+  defp reason(502), do: "Bad Gateway"
   defp reason(_), do: "OK"
 
   defp decode_json(""), do: %{}
@@ -213,7 +278,8 @@ defmodule SymphoniaService.HTTPServer do
     repository
     |> Map.merge(%{
       "workspace" => workspace,
-      "taskCount" => task_count
+      "taskCount" => task_count,
+      "github" => RepositoryLink.link(repository)
     })
   end
 
