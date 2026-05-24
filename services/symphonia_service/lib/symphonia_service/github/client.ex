@@ -2,8 +2,8 @@ defmodule SymphoniaService.GitHub.Client do
   @moduledoc """
   Thin dependency-free GitHub HTTP client.
 
-  Milestone 3 uses GitHub App user access tokens for user-attributed PR and
-  issue actions. Installation tokens are intentionally not used here.
+  Supports GitHub App installation tokens as the primary access model and
+  device-flow user tokens as a development fallback.
   """
 
   @api_version "2022-11-28"
@@ -35,8 +35,20 @@ defmodule SymphoniaService.GitHub.Client do
 
   def list_installations(token), do: api(:get, "/user/installations", token)
 
-  def list_installation_repositories(token, installation_id) do
+  def list_user_installation_repositories(token, installation_id) do
     api(:get, "/user/installations/#{installation_id}/repositories", token)
+  end
+
+  def get_app_installation(jwt, installation_id) do
+    api(:get, "/app/installations/#{encode(installation_id)}", jwt)
+  end
+
+  def create_installation_token(jwt, installation_id) do
+    api(:post, "/app/installations/#{encode(installation_id)}/access_tokens", jwt, %{})
+  end
+
+  def list_installation_repositories(token, page \\ 1, per_page \\ 100) do
+    api(:get, "/installation/repositories?per_page=#{per_page}&page=#{page}", token)
   end
 
   def get_repository(token, owner, repo) do

@@ -4,27 +4,26 @@ defmodule SymphoniaService.GitHub.RepositoryLink do
   """
 
   alias SymphoniaService.RepositoryRegistry
-  alias SymphoniaService.GitHub.{Auth, Client, Remote}
+
+  alias SymphoniaService.GitHub.{
+    Auth,
+    Client,
+    DeviceAuth,
+    InstallationStore,
+    Remote,
+    Repositories
+  }
 
   def state(repository) do
     %{
       "connection" => Auth.connection(),
       "detectedRemote" => Remote.detect(repository),
-      "link" => link(repository)
+      "link" => link(repository),
+      "access" => access_state(repository)
     }
   end
 
-  def accessible_repositories do
-    token = Auth.user_token!()
-
-    with {:ok, %{"installations" => installations}} <- client().list_installations(token) do
-      repositories =
-        installations
-        |> Enum.flat_map(&repositories_for_installation(token, &1))
-
-      %{"repositories" => repositories}
-    end
-  end
+  def accessible_repositories, do: Repositories.accessible_repositories()
 
   def link(registry_path, repository, attrs) do
     remote = Remote.detect(repository) || %{}
@@ -41,21 +40,24 @@ defmodule SymphoniaService.GitHub.RepositoryLink do
         remote["name"] ||
         raise ArgumentError, "GitHub remote was not detected for this repository."
 
-    token = Auth.user_token!()
-
-    case client().get_repository(token, owner, name) do
+    case installed_or_fallback_repo(owner, name) do
       {:ok, github_repo} ->
         github =
           %{
-            "owner" => get_in(github_repo, ["owner", "login"]) || owner,
+            "owner" => owner_login(github_repo) || owner,
             "name" => github_repo["name"] || name,
             "repo_id" => github_repo["id"],
-            "url" => github_repo["html_url"] || "https://github.com/#{owner}/#{name}",
-            "clone_url" => github_repo["clone_url"],
+            "url" =>
+              github_repo["html_url"] || github_repo["url"] ||
+                "https://github.com/#{owner}/#{name}",
+            "clone_url" => github_repo["clone_url"] || github_repo["cloneUrl"],
             "default_branch" =>
-              github_repo["default_branch"] || Remote.default_branch(repository),
+              github_repo["default_branch"] || github_repo["defaultBranch"] ||
+                Remote.default_branch(repository),
             "installation_id" =>
-              Map.get(attrs, "installationId") || Map.get(attrs, "installation_id"),
+              github_repo["installationId"] || github_repo["installation_id"] ||
+                Map.get(attrs, "installationId") || Map.get(attrs, "installation_id"),
+            "auth_mode" => github_repo["authMode"] || "app_installation",
             "linked_at" => now()
           }
           |> Enum.reject(fn {_key, value} -> is_nil(value) end)
@@ -73,7 +75,7 @@ defmodule SymphoniaService.GitHub.RepositoryLink do
               Map.get(
                 payload,
                 "message",
-                "GitHub repository is not accessible. Install Symphonía on this repository and try again."
+                "Symphonía is not installed on this GitHub repository yet."
               )
     end
   end
@@ -89,6 +91,7 @@ defmodule SymphoniaService.GitHub.RepositoryLink do
           "cloneUrl" => github["clone_url"],
           "defaultBranch" => github["default_branch"],
           "installationId" => github["installation_id"],
+          "authMode" => github["auth_mode"],
           "linkedAt" => github["linked_at"]
         }
         |> Enum.reject(fn {_key, value} -> is_nil(value) end)
@@ -99,29 +102,63 @@ defmodule SymphoniaService.GitHub.RepositoryLink do
     end
   end
 
-  defp repositories_for_installation(token, installation) do
-    installation_id = installation["id"]
-    account_login = get_in(installation, ["account", "login"])
-    account_type = get_in(installation, ["account", "type"])
+  defp installed_or_fallback_repo(owner, name) do
+    case InstallationStore.find_repository(owner, name) do
+      nil ->
+        fallback_repo(owner, name)
 
-    case client().list_installation_repositories(token, installation_id) do
-      {:ok, %{"repositories" => repos}} ->
-        Enum.map(repos, fn repo ->
-          %{
-            "owner" => get_in(repo, ["owner", "login"]),
-            "name" => repo["name"],
-            "repoId" => repo["id"],
-            "url" => repo["html_url"],
-            "cloneUrl" => repo["clone_url"],
-            "defaultBranch" => repo["default_branch"],
-            "installationId" => installation_id,
-            "accountLogin" => account_login,
-            "accountType" => account_type
-          }
-        end)
+      repo ->
+        {:ok,
+         %{
+           "owner" => repo["owner"],
+           "name" => repo["name"],
+           "id" => repo["repoId"] || repo["repo_id"],
+           "html_url" => repo["url"],
+           "clone_url" => repo["cloneUrl"] || repo["clone_url"],
+           "default_branch" => repo["defaultBranch"] || repo["default_branch"],
+           "installation_id" => repo["installationId"] || repo["installation_id"],
+           "authMode" => "app_installation"
+         }}
+    end
+  end
 
-      _ ->
-        []
+  defp fallback_repo(owner, name) do
+    if DeviceAuth.enabled?() do
+      token = Auth.user_token!()
+
+      case client().get_repository(token, owner, name) do
+        {:ok, repo} -> {:ok, Map.put(repo, "authMode", "device_user_token")}
+        {:error, payload} -> {:error, payload}
+      end
+    else
+      {:error, %{"message" => "Symphonía is not installed on this GitHub repository yet."}}
+    end
+  end
+
+  defp owner_login(%{"owner" => %{"login" => login}}), do: login
+  defp owner_login(%{"owner" => owner}) when is_binary(owner), do: owner
+  defp owner_login(_repo), do: nil
+
+  defp access_state(repository) do
+    remote = Remote.detect(repository)
+    link = link(repository)
+
+    cond do
+      link ->
+        %{"state" => "linked", "message" => "GitHub linked"}
+
+      is_nil(remote) ->
+        %{"state" => "no_remote", "message" => "GitHub remote was not detected."}
+
+      InstallationStore.find_repository(remote["owner"], remote["name"]) ->
+        %{"state" => "available", "message" => "GitHub App access available"}
+
+      true ->
+        %{
+          "state" => "missing",
+          "message" =>
+            "Install the Symphonía GitHub App on this repository to open pull requests."
+        }
     end
   end
 

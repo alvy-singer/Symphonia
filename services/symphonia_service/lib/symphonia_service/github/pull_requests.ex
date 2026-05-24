@@ -17,7 +17,7 @@ defmodule SymphoniaService.GitHub.PullRequests do
     github_repo = github_repo!(repository, frontmatter)
     head_branch = head_branch!(frontmatter)
     base_branch = base_branch(frontmatter, github_repo)
-    token = Auth.user_token!()
+    token = Auth.token_for_repository(github_repo["owner"], github_repo["name"])
 
     ensure_branch_exists!(token, github_repo, head_branch)
 
@@ -61,7 +61,7 @@ defmodule SymphoniaService.GitHub.PullRequests do
     github_repo = github_repo!(repository, frontmatter)
     pr = Map.get(github, "pull_request") || %{}
     number = pr["number"] || raise ArgumentError, "This task does not have an open pull request."
-    token = Auth.user_token!()
+    token = Auth.token_for_repository(github_repo["owner"], github_repo["name"])
 
     case client().get_pull_request(token, github_repo["owner"], github_repo["name"], number) do
       {:ok, fresh_pr} ->

@@ -1,166 +1,68 @@
 defmodule SymphoniaService.GitHub.Auth do
   @moduledoc """
-  GitHub App user-token authentication for local Symphonia.
+  GitHub auth facade.
+
+  GitHub App installation tokens are the primary access model. Device-flow
+  user tokens are available only as an explicit development fallback.
   """
 
-  alias SymphoniaService.GitHub.{Client, DeviceFlowLimiter, TokenStore}
+  alias SymphoniaService.GitHub.{
+    AppAuth,
+    DeviceAuth,
+    InstallationStore,
+    InstallationToken
+  }
 
-  @refresh_window_seconds 300
+  @install_error "Install the Symphonía GitHub App on this repository to open pull requests."
 
-  def connection, do: TokenStore.public_connection()
+  def install_error, do: @install_error
 
-  def start_device_flow do
-    client_id = client_id!()
+  def connection do
+    installation = InstallationStore.public_state()
+    device = DeviceAuth.public_connection()
+    installed? = installation["installed"] == true
+    device_connected? = device["connected"] == true
 
-    with {:ok, payload} <- client().request_device_code(client_id) do
-      DeviceFlowLimiter.record(payload["device_code"], payload["interval"])
-
-      {:ok,
-       %{
-         "deviceCode" => payload["device_code"],
-         "userCode" => payload["user_code"],
-         "verificationUri" => payload["verification_uri"],
-         "expiresIn" => payload["expires_in"],
-         "interval" => payload["interval"]
-       }}
-    end
+    %{
+      "connected" => installed? or device_connected?,
+      "authMode" => auth_mode(installed?, device_connected?),
+      "installationUrl" => AppAuth.install_url(),
+      "manageUrl" => AppAuth.manage_url(),
+      "appConfigured" => AppAuth.configured?(),
+      "deviceFallbackEnabled" => DeviceAuth.enabled?(),
+      "installed" => installed?,
+      "installedRepositoriesCount" => installation["installedRepositoriesCount"],
+      "installations" => installation["installations"],
+      "user" => if(DeviceAuth.enabled?(), do: device["user"], else: nil),
+      "connectedAt" => if(DeviceAuth.enabled?(), do: device["connectedAt"], else: nil)
+    }
+    |> reject_nil()
   end
 
-  def poll_device_flow(params) do
-    client_id = client_id!()
-    device_code = Map.get(params, "deviceCode") || Map.get(params, "device_code")
-    interval = Map.get(params, "interval") || 5
+  def start_device_flow, do: DeviceAuth.start_device_flow()
+  def poll_device_flow(params), do: DeviceAuth.poll_device_flow(params)
+  def user_token!, do: DeviceAuth.user_token!()
 
-    cond do
-      not is_binary(device_code) or String.trim(device_code) == "" ->
-        {:error, 400, %{"error" => "GitHub device code is missing."}}
+  def token_for_repository(owner, repo) do
+    case InstallationStore.find_repository(owner, repo) do
+      %{"installationId" => installation_id} ->
+        InstallationToken.token_for_installation!(installation_id)
 
-      true ->
-        case DeviceFlowLimiter.allow_poll(device_code, interval) do
-          :ok ->
-            poll_github(client_id, device_code)
-
-          {:error, retry_after} ->
-            {:error, 429,
-             %{"error" => "Wait before checking GitHub again.", "retryAfter" => retry_after}}
-        end
-    end
-  end
-
-  def user_token! do
-    case TokenStore.load() do
-      {:ok, connection} ->
-        token = Map.fetch!(connection, "token")
-
-        if expires_soon?(token["access_token_expires_at"]) do
-          refresh_user_token!(connection)
-        else
-          Map.fetch!(token, "access_token")
-        end
-
-      :none ->
-        raise ArgumentError, "Connect GitHub to open pull requests."
-    end
-  end
-
-  defp poll_github(client_id, device_code) do
-    case client().poll_device_code(client_id, device_code) do
-      {:ok, %{"error" => "authorization_pending"} = payload} ->
-        {:pending,
-         %{"status" => "authorization_pending", "interval" => Map.get(payload, "interval")}}
-
-      {:ok, %{"error" => "slow_down"} = payload} ->
-        interval = DeviceFlowLimiter.slow_down(device_code)
-
-        {:pending,
-         %{"status" => "slow_down", "interval" => Map.get(payload, "interval", interval)}}
-
-      {:ok, %{"error" => error} = payload}
-      when error in ["expired_token", "access_denied", "device_flow_disabled"] ->
-        DeviceFlowLimiter.clear(device_code)
-        {:error, 400, %{"error" => device_flow_error(error), "githubError" => payload}}
-
-      {:ok, %{"access_token" => access_token} = token_response} when is_binary(access_token) ->
-        DeviceFlowLimiter.clear(device_code)
-
-        with {:ok, user} <- client().get_user(access_token) do
-          connection = TokenStore.save_token_response(token_response, user)
-          {:ok, TokenStore.public_connection() |> Map.put("user", connection["user"])}
-        end
-
-      {:ok, payload} ->
-        {:error, 400, %{"error" => "GitHub authorization failed.", "githubError" => payload}}
-
-      {:error, payload} ->
-        {:error, Map.get(payload, "status", 502),
-         %{
-           "error" => Map.get(payload, "message", "GitHub authorization failed."),
-           "githubError" => payload
-         }}
-    end
-  end
-
-  defp refresh_user_token!(connection) do
-    token = Map.fetch!(connection, "token")
-    refresh_token = token["refresh_token"]
-
-    cond do
-      not is_binary(refresh_token) or refresh_token == "" ->
-        raise ArgumentError, "Connect GitHub to open pull requests."
-
-      expires_soon?(token["refresh_token_expires_at"]) ->
-        raise ArgumentError, "Connect GitHub to open pull requests."
-
-      true ->
-        case client().refresh_user_token(client_id!(), client_secret!(), refresh_token) do
-          {:ok, response} ->
-            connection
-            |> TokenStore.replace_token(response)
-            |> get_in(["token", "access_token"])
-
-          {:error, payload} ->
-            raise ArgumentError,
-                  Map.get(payload, "message", "Connect GitHub to open pull requests.")
-        end
-    end
-  end
-
-  defp expires_soon?(nil), do: false
-
-  defp expires_soon?(iso8601) do
-    case DateTime.from_iso8601(iso8601) do
-      {:ok, expires_at, _offset} ->
-        DateTime.compare(
-          expires_at,
-          DateTime.utc_now() |> DateTime.add(@refresh_window_seconds, :second)
-        ) != :gt
+      %{"installation_id" => installation_id} ->
+        InstallationToken.token_for_installation!(installation_id)
 
       _ ->
-        false
+        if DeviceAuth.enabled?() do
+          DeviceAuth.user_token!()
+        else
+          raise ArgumentError, @install_error
+        end
     end
   end
 
-  defp client_id! do
-    case System.get_env("SYMPHONIA_GITHUB_CLIENT_ID") do
-      value when is_binary(value) and value != "" -> value
-      _ -> raise ArgumentError, "Set SYMPHONIA_GITHUB_CLIENT_ID to connect GitHub."
-    end
-  end
+  defp auth_mode(true, _device_connected?), do: "app_installation"
+  defp auth_mode(false, true), do: "device_user_token"
+  defp auth_mode(false, false), do: nil
 
-  defp client_secret! do
-    case System.get_env("SYMPHONIA_GITHUB_CLIENT_SECRET") do
-      value when is_binary(value) and value != "" -> value
-      _ -> raise ArgumentError, "Set SYMPHONIA_GITHUB_CLIENT_SECRET to refresh GitHub access."
-    end
-  end
-
-  defp device_flow_error("expired_token"), do: "GitHub authorization expired. Start again."
-  defp device_flow_error("access_denied"), do: "GitHub authorization was denied."
-
-  defp device_flow_error("device_flow_disabled"),
-    do: "GitHub device flow is disabled for this app."
-
-  defp client do
-    Application.get_env(:symphonia_service, :github_client, Client)
-  end
+  defp reject_nil(map), do: map |> Enum.reject(fn {_key, value} -> is_nil(value) end) |> Map.new()
 end

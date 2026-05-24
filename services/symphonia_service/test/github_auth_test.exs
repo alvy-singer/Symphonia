@@ -24,6 +24,7 @@ defmodule SymphoniaService.GitHub.AuthTest do
     previous_client_id = System.get_env("SYMPHONIA_GITHUB_CLIENT_ID")
     System.put_env("SYMPHONIA_GITHUB_CLIENT_ID", "client-id")
     Application.put_env(:symphonia_service, :github_client, StubClient)
+    Application.put_env(:symphonia_service, :github_allow_device_fallback, true)
 
     on_exit(fn ->
       if previous_client_id,
@@ -31,6 +32,7 @@ defmodule SymphoniaService.GitHub.AuthTest do
         else: System.delete_env("SYMPHONIA_GITHUB_CLIENT_ID")
 
       Application.delete_env(:symphonia_service, :github_client)
+      Application.delete_env(:symphonia_service, :github_allow_device_fallback)
     end)
   end
 

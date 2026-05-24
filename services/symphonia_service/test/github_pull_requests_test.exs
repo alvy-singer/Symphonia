@@ -2,18 +2,30 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
   use ExUnit.Case
 
   alias SymphoniaService.{RepositoryRegistry, Workspace}
-  alias SymphoniaService.GitHub.{PullRequests, TokenStore}
+  alias SymphoniaService.GitHub.{InstallationStore, PullRequests}
 
   defmodule StubClient do
-    def get_branch("token", "agora-creations", "symphonia", "task-branch") do
+    def create_installation_token(jwt, installation_id) do
+      assert String.split(jwt, ".") |> length() == 3
+      assert to_string(installation_id) == "123"
+
+      {:ok,
+       %{
+         "token" => "installation-token",
+         "expires_at" =>
+           DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.to_iso8601()
+       }}
+    end
+
+    def get_branch("installation-token", "agora-creations", "symphonia", "task-branch") do
       {:ok, %{"name" => "task-branch"}}
     end
 
-    def get_branch("token", "agora-creations", "symphonia", "missing-branch") do
+    def get_branch("installation-token", "agora-creations", "symphonia", "missing-branch") do
       {:error, %{"status" => 404, "message" => "Branch not found"}}
     end
 
-    def create_pull_request("token", "agora-creations", "symphonia", payload) do
+    def create_pull_request("installation-token", "agora-creations", "symphonia", payload) do
       assert payload["head"] == "task-branch"
       assert payload["base"] == "main"
 
@@ -27,7 +39,7 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
        }}
     end
 
-    def get_pull_request("token", "agora-creations", "symphonia", 456) do
+    def get_pull_request("installation-token", "agora-creations", "symphonia", 456) do
       {:ok,
        %{
          "number" => 456,
@@ -39,7 +51,7 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
        }}
     end
 
-    def update_issue("token", "agora-creations", "symphonia", 123, payload) do
+    def update_issue("installation-token", "agora-creations", "symphonia", 123, payload) do
       assert payload == %{"state" => "closed", "state_reason" => "completed"}
 
       {:ok,
@@ -58,25 +70,42 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     repo_path = Path.join(root, "repo")
     registry_path = Path.join(root, "registry.json")
     github_home = Path.join(root, "github")
+    private_key_path = Path.join(root, "github-app.pem")
     File.mkdir_p!(Path.join(repo_path, ".git"))
+    write_private_key!(private_key_path)
+
+    previous_app_id = System.get_env("SYMPHONIA_GITHUB_APP_ID")
+    previous_private_key = System.get_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH")
+    System.put_env("SYMPHONIA_GITHUB_APP_ID", "42")
+    System.put_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH", private_key_path)
 
     Application.put_env(:symphonia_service, :github_client, StubClient)
     Application.put_env(:symphonia_service, :github_home, github_home)
 
     on_exit(fn ->
+      restore_env("SYMPHONIA_GITHUB_APP_ID", previous_app_id)
+      restore_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH", previous_private_key)
       Application.delete_env(:symphonia_service, :github_client)
       Application.delete_env(:symphonia_service, :github_home)
       File.rm_rf(root)
     end)
 
-    TokenStore.save_token_response(
-      %{"access_token" => "token", "refresh_token" => "refresh", "expires_in" => 28_800},
-      %{"id" => 1, "login" => "alvy"},
-      home: github_home
-    )
-
     repository = RepositoryRegistry.add(registry_path, %{"path" => repo_path, "key" => "SYM"})
     Workspace.initialize(repository)
+
+    InstallationStore.upsert_installation(%{
+      "id" => 123,
+      "account" => %{"login" => "agora-creations", "type" => "Organization"},
+      "repositories" => [
+        %{
+          "owner" => "agora-creations",
+          "name" => "symphonia",
+          "repo_id" => 99,
+          "url" => "https://github.com/agora-creations/symphonia",
+          "default_branch" => "main"
+        }
+      ]
+    })
 
     repository =
       RepositoryRegistry.update(registry_path, "SYM", fn repo ->
@@ -84,7 +113,9 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
           "owner" => "agora-creations",
           "name" => "symphonia",
           "url" => "https://github.com/agora-creations/symphonia",
-          "default_branch" => "main"
+          "default_branch" => "main",
+          "installation_id" => 123,
+          "auth_mode" => "app_installation"
         })
       end)
 
@@ -136,6 +167,30 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     assert task["body"] =~ "Linked GitHub issue closed automatically."
   end
 
+  test "GitHub credentials are never written to repository files", %{
+    repo_path: repo_path,
+    root: root,
+    repository: repository
+  } do
+    write_task(repo_path, "task-branch")
+    PullRequests.open_from_task(repository, "SYM-1")
+
+    task_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
+    registry = File.read!(Path.join(root, "registry.json"))
+
+    for forbidden <- [
+          "private_key",
+          "access_token",
+          "refresh_token",
+          "installation_token",
+          "client_secret",
+          "installation-token"
+        ] do
+      refute task_markdown =~ forbidden
+      refute registry =~ forbidden
+    end
+  end
+
   defp write_task(repo_path, head_branch) do
     File.write!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]), """
     ---
@@ -164,4 +219,13 @@ defmodule SymphoniaService.GitHub.PullRequestsTest do
     Approved handoff.
     """)
   end
+
+  defp write_private_key!(path) do
+    key = :public_key.generate_key({:rsa, 1024, 65_537})
+    entry = :public_key.pem_entry_encode(:RSAPrivateKey, key)
+    File.write!(path, :public_key.pem_encode([entry]))
+  end
+
+  defp restore_env(key, nil), do: System.delete_env(key)
+  defp restore_env(key, value), do: System.put_env(key, value)
 end

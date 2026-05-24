@@ -6,7 +6,7 @@ defmodule SymphoniaService.HTTPServer do
   use GenServer
 
   alias SymphoniaService.{RepositoryRegistry, TaskStore, Workspace}
-  alias SymphoniaService.GitHub.{Auth, PullRequests, RepositoryLink, Sync}
+  alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -94,6 +94,10 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "workspace" => Workspace.state(repository)}}
 
+      ["api", "github", "installations", "callback"] ->
+        github = Repositories.complete_installation(query_params(path))
+        {200, %{"connection" => Auth.connection(), "github" => github}}
+
       ["api", "repositories", repo, "github"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "github" => RepositoryLink.state(repository)}}
@@ -176,6 +180,14 @@ defmodule SymphoniaService.HTTPServer do
              }}
         end
 
+      ["api", "github", "installations", "complete"] ->
+        github = Repositories.complete_installation(decode_json(body))
+        {200, %{"connection" => Auth.connection(), "github" => github}}
+
+      ["api", "github", "installations", "refresh"] ->
+        github = Repositories.refresh_installations(decode_json(body))
+        {200, %{"connection" => Auth.connection(), "github" => github}}
+
       ["api", "repositories", repo, "workspace", "initialize"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         workspace = Workspace.initialize(repository)
@@ -235,6 +247,13 @@ defmodule SymphoniaService.HTTPServer do
     |> String.trim_leading("/")
     |> String.split("/", trim: true)
     |> Enum.map(&URI.decode/1)
+  end
+
+  defp query_params(path) do
+    case String.split(path, "?", parts: 2) do
+      [_path, query] -> URI.decode_query(query)
+      _ -> %{}
+    end
   end
 
   defp send_json(client, status, payload) do

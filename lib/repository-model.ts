@@ -20,6 +20,7 @@ export interface RepositorySummary {
 
 export interface GitHubConnectionState {
   connected: boolean;
+  authMode?: "app_installation" | "device_user_token";
   user?: {
     id?: number;
     login?: string;
@@ -27,9 +28,25 @@ export interface GitHubConnectionState {
     url?: string;
   };
   connectedAt?: string;
-  accessTokenExpiresAt?: string;
-  refreshTokenExpiresAt?: string;
   installationUrl?: string;
+  manageUrl?: string;
+  appConfigured?: boolean;
+  deviceFallbackEnabled?: boolean;
+  installed?: boolean;
+  installedRepositoriesCount?: number;
+  installations?: GitHubInstallation[];
+}
+
+export interface GitHubInstallation {
+  id: number | string;
+  account?: {
+    login?: string;
+    type?: string;
+    url?: string;
+  };
+  repositorySelection?: string;
+  repositoryCount?: number;
+  updatedAt?: string;
 }
 
 export interface GitHubRemote {
@@ -48,6 +65,7 @@ export interface GitHubRepositoryLink {
   cloneUrl?: string;
   defaultBranch?: string;
   installationId?: number;
+  authMode?: "app_installation" | "device_user_token";
   linkedAt?: string;
 }
 
@@ -55,6 +73,10 @@ export interface RepositoryGitHubState {
   connection: GitHubConnectionState;
   detectedRemote?: GitHubRemote | null;
   link?: GitHubRepositoryLink | null;
+  access?: {
+    state: "linked" | "available" | "missing" | "no_remote" | string;
+    message?: string;
+  };
 }
 
 export interface WorkflowTemplate {

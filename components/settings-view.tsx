@@ -345,6 +345,7 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
   const [connection, setConnection] = useState<GitHubConnectionState | null>(null);
   const [repoState, setRepoState] = useState<RepositoryGitHubState | null>(null);
   const [device, setDevice] = useState<DeviceFlowState | null>(null);
+  const [installationId, setInstallationId] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -455,9 +456,63 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
     }
   };
 
+  const completeInstallation = async () => {
+    const trimmed = installationId.trim();
+    if (!trimmed) return;
+
+    setPending("installation");
+    setError(null);
+    try {
+      const res = await fetch("/api/github/installations/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ installation_id: trimmed }),
+      });
+      const payload = (await res.json()) as { connection?: GitHubConnectionState; error?: string };
+      if (!res.ok || !payload.connection) {
+        throw new Error(payload.error ?? "Could not record GitHub installation");
+      }
+      setConnection(payload.connection);
+      setRepoState(await fetchRepositoryGitHub(repoKey));
+      setInstallationId("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not record GitHub installation");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const refreshInstallations = async () => {
+    setPending("refresh");
+    setError(null);
+    try {
+      const res = await fetch("/api/github/installations/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const payload = (await res.json()) as { connection?: GitHubConnectionState; error?: string };
+      if (!res.ok || !payload.connection) {
+        throw new Error(payload.error ?? "Could not refresh GitHub installations");
+      }
+      setConnection(payload.connection);
+      setRepoState(await fetchRepositoryGitHub(repoKey));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not refresh GitHub installations");
+    } finally {
+      setPending(null);
+    }
+  };
+
   const connected = connection?.connected;
   const link = repoState?.link;
   const detected = repoState?.detectedRemote;
+  const installed = connection?.installed || (connection?.installedRepositoriesCount ?? 0) > 0;
+  const installedCount = connection?.installedRepositoriesCount ?? 0;
+  const accessState = repoState?.access?.state;
+  const installUrl = withRepoState(connection?.installationUrl, repoKey);
+  const manageUrl = connection?.manageUrl ?? connection?.installationUrl;
+  const canLink = accessState === "available" || connection?.authMode === "device_user_token";
 
   return (
     <div className="rounded-md border">
@@ -469,19 +524,30 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
           <div className="min-w-0">
             <div className="text-sm font-medium">GitHub</div>
             <div className="text-xs text-muted-foreground">
-              Open pull requests and update linked issues for this repository.
+              Install the Symphonía GitHub App to choose which repositories Symphonía can access.
             </div>
+            {!connected && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                You can still manage local tasks without GitHub.
+              </div>
+            )}
+            {installed && !link && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Symphonía is installed on {installedCount}{" "}
+                {installedCount === 1 ? "repository" : "repositories"}.
+              </div>
+            )}
             {detected && (
               <div className="mt-2 text-[11px] text-muted-foreground">
-                GitHub remote detected:{" "}
+                Detected local repository:{" "}
                 <span className="font-mono">
                   {detected.owner}/{detected.name}
                 </span>
               </div>
             )}
             {link && (
-              <div className="mt-1 text-[11px] text-muted-foreground">
-                Linked local repo:{" "}
+              <div className="mt-2 text-[11px] text-muted-foreground">
+                This workspace is connected to{" "}
                 <a
                   href={link.url}
                   target="_blank"
@@ -490,65 +556,139 @@ function GitHubIntegration({ repoKey }: { repoKey: string }) {
                 >
                   {link.owner}/{link.name}
                 </a>
+                .
               </div>
             )}
-            {device && (
+            {!link && accessState === "missing" && detected && (
+              <div className="mt-2 flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>Symphonía is not installed on this GitHub repository yet.</span>
+              </div>
+            )}
+            {connection?.deviceFallbackEnabled && (
               <div className="mt-3 rounded-md border bg-muted/30 p-3 text-xs">
-                <div className="font-medium">Authorize Symphonia on GitHub</div>
+                <div className="font-medium">Developer option</div>
                 <div className="mt-1 text-muted-foreground">
-                  Enter code <span className="font-mono text-foreground">{device.userCode}</span>
+                  Use GitHub device login for local testing.
                 </div>
-                <a
-                  href={device.verificationUri}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 hover:bg-muted"
-                >
-                  Open GitHub <ExternalLink className="h-3 w-3" />
-                </a>
+                {device && (
+                  <div className="mt-3 rounded-md border bg-background p-3">
+                    <div className="font-medium">Authorize Symphonía on GitHub</div>
+                    <div className="mt-1 text-muted-foreground">
+                      Enter code{" "}
+                      <span className="font-mono text-foreground">{device.userCode}</span>
+                    </div>
+                    <a
+                      href={device.verificationUri}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 hover:bg-muted"
+                    >
+                      Open GitHub <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                )}
+                {!device && (
+                  <button
+                    onClick={startConnection}
+                    disabled={pending != null}
+                    className="mt-2 rounded-md border bg-background px-2.5 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {pending === "connect" ? "Connecting..." : "Connect with device flow"}
+                  </button>
+                )}
               </div>
             )}
+            <div className="mt-3 rounded-md border bg-muted/20 p-3 text-xs">
+              <div className="font-medium">Manual recovery</div>
+              <div className="mt-1 text-muted-foreground">
+                Paste an installation ID if the local callback used the wrong port.
+              </div>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={installationId}
+                  onChange={(event) => setInstallationId(event.target.value)}
+                  placeholder="Installation ID"
+                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <button
+                  onClick={completeInstallation}
+                  disabled={!installationId.trim() || pending != null}
+                  className="rounded-md border bg-background px-2.5 py-1 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {pending === "installation" ? "Saving..." : "Save installation"}
+                </button>
+              </div>
+              {installed && (
+                <button
+                  onClick={refreshInstallations}
+                  disabled={pending != null}
+                  className="mt-2 rounded-md border bg-background px-2.5 py-1 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {pending === "refresh" ? "Refreshing..." : "Refresh GitHub installations"}
+                </button>
+              )}
+            </div>
             {error && (
               <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">{error}</div>
             )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {connected ? (
+          {link ? (
             <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
               <Check className="h-3 w-3" />
-              {connection?.user?.login ?? "Connected"}
+              Linked
             </span>
-          ) : (
-            <button
-              onClick={startConnection}
-              disabled={pending != null}
-              className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {pending === "connect" ? "Connecting…" : "Connect GitHub"}
-            </button>
-          )}
-          {connection?.installationUrl && (
+          ) : installed ? (
+            <span className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs text-muted-foreground">
+              <Check className="h-3 w-3" />
+              Installed
+            </span>
+          ) : null}
+          {installUrl && !installed && (
             <a
-              href={connection.installationUrl}
+              href={installUrl}
+              rel="noreferrer"
+              className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
+            >
+              Install GitHub App
+            </a>
+          )}
+          {manageUrl && installed && (
+            <a
+              href={manageUrl}
               target="_blank"
               rel="noreferrer"
               className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
             >
-              Install Symphonia
+              Manage access
             </a>
           )}
           <button
             onClick={linkLocalRepo}
-            disabled={!connected || pending != null}
+            disabled={!canLink || pending != null}
             className="rounded-md border px-2.5 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {pending === "link" ? "Linking…" : link ? "Relink local repo" : "Link local repo"}
+            {pending === "link" ? "Linking..." : link ? "Relink repository" : "Link this repository"}
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+function withRepoState(url: string | undefined, repoKey: string): string | undefined {
+  if (!url) return undefined;
+
+  try {
+    const next = new URL(url);
+    next.searchParams.set("state", repoKey);
+    return next.toString();
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}state=${encodeURIComponent(repoKey)}`;
+  }
 }
 
 function IntegrationRow({
