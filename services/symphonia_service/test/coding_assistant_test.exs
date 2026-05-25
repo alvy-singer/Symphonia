@@ -2,6 +2,7 @@ defmodule SymphoniaService.CodingAssistantTest do
   use ExUnit.Case
 
   alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
+  alias SymphoniaService.CodingAssistant.RunStore
   alias SymphoniaService.GitHub.{InstallationStore, PullRequests}
 
   defmodule StubClient do
@@ -33,6 +34,21 @@ defmodule SymphoniaService.CodingAssistantTest do
          "head" => %{"ref" => "symphonia/task/sym-1"},
          "base" => %{"ref" => "main"}
        }}
+    end
+  end
+
+  defmodule SlowProvider do
+    @behaviour SymphoniaService.CodingAssistant.Provider
+
+    def id, do: "slow_demo"
+
+    def run(_repository, _task, run, _params) do
+      if pid = Application.get_env(:symphonia_service, :slow_provider_test_pid) do
+        send(pid, {:slow_provider_started, run["id"]})
+      end
+
+      Process.sleep(:infinity)
+      {:error, "The Coding Assistant should have been canceled."}
     end
   end
 
@@ -77,6 +93,7 @@ defmodule SymphoniaService.CodingAssistantTest do
       restore_env("SYMPHONIA_RUNS_ROOT", previous_runs_root)
       Application.delete_env(:symphonia_service, :github_client)
       Application.delete_env(:symphonia_service, :github_home)
+      Application.delete_env(:symphonia_service, :slow_provider_test_pid)
       restore_app_env(:coding_assistant_provider, previous_provider)
       File.rm_rf(root)
     end)
@@ -135,6 +152,11 @@ defmodule SymphoniaService.CodingAssistantTest do
   } do
     result = CodingAssistant.start_run(registry_path, repository, task["key"])
 
+    assert result["run"]["state"] in ["queued", "running"]
+    assert result["task"]["status"] == "in_progress"
+
+    result = wait_for_run(repository, task["key"], result["run"]["id"], "completed")
+
     assert result["run"]["state"] == "completed"
     assert result["task"]["status"] == "in_review"
     assert result["task"]["assistant"] == "local_demo"
@@ -183,7 +205,8 @@ defmodule SymphoniaService.CodingAssistantTest do
     repository: repository,
     task: task
   } do
-    CodingAssistant.start_run(registry_path, repository, task["key"])
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+    wait_for_run(repository, task["key"], result["run"]["id"], "completed")
     TaskStore.apply_event(repository, task["key"], "approve")
 
     updated = PullRequests.open_from_task(repository, task["key"])
@@ -200,7 +223,8 @@ defmodule SymphoniaService.CodingAssistantTest do
     runs_root: runs_root,
     task: task
   } do
-    CodingAssistant.start_run(registry_path, repository, task["key"])
+    initial = CodingAssistant.start_run(registry_path, repository, task["key"])
+    wait_for_run(repository, task["key"], initial["run"]["id"], "completed")
 
     feedback =
       "The card is still too dense. Remove validation from the default card, make the project label smaller, and show retry only when paused."
@@ -210,8 +234,9 @@ defmodule SymphoniaService.CodingAssistantTest do
         "feedback" => feedback
       })
 
-    assert result["run"]["state"] == "completed"
-    assert result["task"]["status"] == "in_review"
+    assert result["run"]["state"] in ["queued", "running"]
+    result_task = wait_for_task_status(repository, task["key"], "in_review")
+    assert result_task["status"] == "in_review"
     assert result["review_note"]["original_feedback"] == feedback
 
     assert result["review_note"]["requested_changes"] == [
@@ -276,7 +301,8 @@ defmodule SymphoniaService.CodingAssistantTest do
     runs_root: runs_root,
     task: task
   } do
-    CodingAssistant.start_run(registry_path, repository, task["key"])
+    initial = CodingAssistant.start_run(registry_path, repository, task["key"])
+    wait_for_run(repository, task["key"], initial["run"]["id"], "completed")
 
     first_result =
       CodingAssistant.continue_from_review_notes(registry_path, repository, task["key"], %{
@@ -284,7 +310,7 @@ defmodule SymphoniaService.CodingAssistantTest do
         "forceFailureOnce" => true
       })
 
-    assert first_result["task"]["status"] == "in_review"
+    wait_for_task_status(repository, task["key"], "in_review")
 
     first_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
     assert first_markdown =~ "attempt: 2"
@@ -295,7 +321,7 @@ defmodule SymphoniaService.CodingAssistantTest do
         "feedback" => "Make the project label smaller."
       })
 
-    assert second_result["task"]["status"] == "in_review"
+    wait_for_task_status(repository, task["key"], "in_review")
 
     second_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
     assert second_markdown =~ "attempt: 1"
@@ -320,9 +346,142 @@ defmodule SymphoniaService.CodingAssistantTest do
     result =
       CodingAssistant.start_run(registry_path, repository, task["key"], %{"forceFailure" => true})
 
+    result = wait_for_run(repository, task["key"], result["run"]["id"], "failed")
+
     assert result["run"]["state"] == "failed"
     assert result["task"]["status"] == "paused"
     assert result["task"]["pausedReason"] == "run_failed"
+  end
+
+  test "active run can be canceled and leaves task paused for retry", %{
+    registry_path: registry_path,
+    repository: repository,
+    task: task
+  } do
+    Application.put_env(:symphonia_service, :coding_assistant_provider, SlowProvider)
+    Application.put_env(:symphonia_service, :slow_provider_test_pid, self())
+
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+
+    assert result["run"]["state"] in ["queued", "running"]
+    assert result["task"]["status"] == "in_progress"
+    assert_receive {:slow_provider_started, run_id}, 1_000
+
+    canceled = CodingAssistant.cancel_run(repository, task["key"], run_id)
+
+    assert canceled["run"]["state"] == "canceled"
+    assert canceled["task"]["status"] == "paused"
+    assert canceled["task"]["pausedReason"] == "waiting_for_user"
+
+    assert canceled["task"]["pausedExplanation"] ==
+             "Run canceled. The task is paused. You can retry when ready."
+
+    assert RunStore.get(run_id)["state"] == "canceled"
+
+    Application.put_env(
+      :symphonia_service,
+      :coding_assistant_provider,
+      SymphoniaService.CodingAssistant.LocalDemoProvider
+    )
+
+    retry = CodingAssistant.start_run(registry_path, repository, task["key"])
+    retry = wait_for_run(repository, task["key"], retry["run"]["id"], "completed")
+
+    assert retry["task"]["status"] == "in_review"
+  end
+
+  test "HTTP run detail and cancel endpoints expose active background run", %{
+    registry_path: registry_path,
+    repository: repository,
+    task: task
+  } do
+    Application.put_env(:symphonia_service, :coding_assistant_provider, SlowProvider)
+    Application.put_env(:symphonia_service, :slow_provider_test_pid, self())
+
+    port = free_port()
+    name = :"symphonia_http_test_#{System.unique_integer([:positive])}"
+
+    {:ok, _server} =
+      SymphoniaService.HTTPServer.start_link(port: port, registry_path: registry_path, name: name)
+
+    {201, started} =
+      http_json(
+        :post,
+        "http://127.0.0.1:#{port}/api/repositories/#{repository["key"]}/tasks/#{task["key"]}/coding-assistant/runs",
+        %{}
+      )
+
+    run_id = started["run"]["id"]
+    assert started["run"]["state"] in ["queued", "running"]
+    assert started["task"]["status"] == "in_progress"
+    assert_receive {:slow_provider_started, ^run_id}, 1_000
+
+    {200, detail} =
+      http_json(
+        :get,
+        "http://127.0.0.1:#{port}/api/repositories/#{repository["key"]}/tasks/#{task["key"]}/coding-assistant/runs/#{run_id}"
+      )
+
+    assert detail["run"]["state"] == "running"
+    assert detail["run"]["currentStep"] == "Running Coding Assistant"
+
+    {200, canceled} =
+      http_json(
+        :post,
+        "http://127.0.0.1:#{port}/api/repositories/#{repository["key"]}/tasks/#{task["key"]}/coding-assistant/runs/#{run_id}/cancel",
+        %{}
+      )
+
+    assert canceled["run"]["state"] == "canceled"
+    assert canceled["task"]["status"] == "paused"
+    assert canceled["task"]["pausedReason"] == "waiting_for_user"
+  end
+
+  test "recovering interrupted active runs pauses affected tasks", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root,
+    task: task
+  } do
+    run =
+      RunStore.create(
+        %{
+          "provider" => "local_demo",
+          "repository" => repository["key"],
+          "task" => task["key"]
+        },
+        root: runs_root
+      )
+      |> RunStore.mark_running(root: runs_root)
+
+    TaskStore.apply_event(repository, task["key"], "start")
+
+    TaskStore.patch_task(repository, task["key"], %{
+      "frontmatter" => %{
+        "run" => %{
+          "id" => run["id"],
+          "state" => run["state"],
+          "current_step" => run["current_step"],
+          "started_at" => run["started_at"]
+        }
+      }
+    })
+
+    CodingAssistant.recover_interrupted_runs(registry_path, root: runs_root)
+
+    recovered = RunStore.get(run["id"], root: runs_root)
+    recovered_task = TaskStore.get_task(repository, task["key"])
+
+    assert recovered["state"] == "failed"
+
+    assert recovered["message"] ==
+             "The Coding Assistant stopped because Symphonía restarted during the run."
+
+    assert recovered_task["status"] == "paused"
+    assert recovered_task["pausedReason"] == "run_failed"
+
+    assert recovered_task["pausedExplanation"] ==
+             "The Coding Assistant stopped because Symphonía restarted during the run."
   end
 
   test "two failed continuation attempts pause the task with run failed", %{
@@ -332,7 +491,8 @@ defmodule SymphoniaService.CodingAssistantTest do
     runs_root: runs_root,
     task: task
   } do
-    CodingAssistant.start_run(registry_path, repository, task["key"])
+    initial = CodingAssistant.start_run(registry_path, repository, task["key"])
+    wait_for_run(repository, task["key"], initial["run"]["id"], "completed")
 
     result =
       CodingAssistant.continue_from_review_notes(registry_path, repository, task["key"], %{
@@ -340,11 +500,15 @@ defmodule SymphoniaService.CodingAssistantTest do
         "forceFailure" => true
       })
 
-    assert result["run"]["state"] == "failed"
-    assert result["task"]["status"] == "paused"
-    assert result["task"]["pausedReason"] == "run_failed"
+    assert result["run"]["state"] in ["queued", "running"]
+    result_task = wait_for_task_status(repository, task["key"], "paused")
+    final_run = latest_run!(runs_root, "review_continuation")
 
-    assert result["task"]["pausedExplanation"] ==
+    assert final_run["state"] == "failed"
+    assert result_task["status"] == "paused"
+    assert result_task["pausedReason"] == "run_failed"
+
+    assert result_task["pausedExplanation"] ==
              "The Coding Assistant could not produce a new handoff after your requested changes."
 
     task_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
@@ -360,6 +524,78 @@ defmodule SymphoniaService.CodingAssistantTest do
 
     assert Enum.count(continuation_runs) == 2
     assert Enum.all?(continuation_runs, &(&1["state"] == "failed"))
+  end
+
+  defp wait_for_run(repository, task_key, run_id, state, attempts \\ 80) do
+    run = RunStore.get(run_id)
+    task = TaskStore.get_task(repository, task_key)
+
+    if run && run["state"] == state do
+      %{"run" => RunStore.public(run), "task" => task}
+    else
+      if attempts <= 0 do
+        flunk("run #{run_id} did not reach #{state}; last state: #{inspect(run && run["state"])}")
+      end
+
+      Process.sleep(50)
+      wait_for_run(repository, task_key, run_id, state, attempts - 1)
+    end
+  end
+
+  defp wait_for_task_status(repository, task_key, status, attempts \\ 80) do
+    task = TaskStore.get_task(repository, task_key)
+
+    if task && task["status"] == status do
+      task
+    else
+      if attempts <= 0 do
+        flunk(
+          "task #{task_key} did not reach #{status}; last status: #{inspect(task && task["status"])}"
+        )
+      end
+
+      Process.sleep(50)
+      wait_for_task_status(repository, task_key, status, attempts - 1)
+    end
+  end
+
+  defp latest_run!(runs_root, kind) do
+    runs_root
+    |> Path.join("run_*.json")
+    |> Path.wildcard()
+    |> Enum.map(&JSON.decode!(File.read!(&1)))
+    |> Enum.filter(&(&1["kind"] == kind))
+    |> Enum.max_by(& &1["created_at"])
+  end
+
+  defp http_json(:get, url) do
+    :inets.start()
+
+    {:ok, {{_version, status, _reason}, _headers, body}} =
+      :httpc.request(:get, {String.to_charlist(url), []}, [], body_format: :binary)
+
+    {status, JSON.decode!(body)}
+  end
+
+  defp http_json(:post, url, payload) do
+    :inets.start()
+
+    {:ok, {{_version, status, _reason}, _headers, body}} =
+      :httpc.request(
+        :post,
+        {String.to_charlist(url), [], ~c"application/json", JSON.encode!(payload)},
+        [],
+        body_format: :binary
+      )
+
+    {status, JSON.decode!(body)}
+  end
+
+  defp free_port do
+    {:ok, socket} = :gen_tcp.listen(0, [:binary, packet: :raw, active: false])
+    {:ok, {_address, port}} = :inet.sockname(socket)
+    :gen_tcp.close(socket)
+    port
   end
 
   defp setup_git!(root) do

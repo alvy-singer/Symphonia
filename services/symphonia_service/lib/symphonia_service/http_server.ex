@@ -118,6 +118,11 @@ defmodule SymphoniaService.HTTPServer do
           task -> {200, %{"task" => public_task(task)}}
         end
 
+      ["api", "repositories", repo, "tasks", task_key, "coding-assistant", "runs", run_id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        run = CodingAssistant.get_run(repository, task_key, run_id)
+        {200, %{"run" => run}}
+
       _ ->
         {404, %{"error" => "Not found"}}
     end
@@ -244,6 +249,26 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         result = CodingAssistant.start_run(registry_path, repository, task_key, decode_json(body))
         {201, %{"run" => result["run"], "task" => public_task(result["task"])}}
+
+      [
+        "api",
+        "repositories",
+        repo,
+        "tasks",
+        task_key,
+        "coding-assistant",
+        "runs",
+        run_id,
+        "cancel"
+      ] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        result = CodingAssistant.cancel_run(repository, task_key, run_id)
+
+        {200,
+         %{
+           "run" => result["run"],
+           "task" => result["task"] && public_task(result["task"])
+         }}
 
       ["api", "repositories", repo, "tasks", task_key, "review", "request-changes"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)

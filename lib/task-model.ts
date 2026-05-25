@@ -19,6 +19,7 @@ export type TaskLifecycleEvent =
   | "start"
   | "submit_review"
   | "fail_run"
+  | "pause_run"
   | "approve"
   | "request_changes"
   | "open_pr"
@@ -53,7 +54,10 @@ export interface GitHubTaskMetadata {
 
 export interface CodingAssistantRun {
   id: string;
-  state: "queued" | "running" | "completed" | "failed" | string;
+  state: "queued" | "running" | "completed" | "failed" | "canceled" | string;
+  label?: string;
+  currentStep?: string;
+  message?: string;
   startedAt?: string;
   completedAt?: string;
 }

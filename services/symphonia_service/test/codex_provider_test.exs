@@ -3,6 +3,7 @@ defmodule SymphoniaService.CodexProviderTest do
 
   alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
   alias SymphoniaService.CodingAssistant.CodexProvider
+  alias SymphoniaService.CodingAssistant.RunStore
   alias SymphoniaService.GitHub.InstallationStore
 
   defmodule StubClient do
@@ -133,6 +134,11 @@ defmodule SymphoniaService.CodexProviderTest do
   } do
     result = CodingAssistant.start_run(registry_path, repository, task["key"])
 
+    assert result["run"]["state"] in ["queued", "running"]
+    assert result["task"]["status"] == "in_progress"
+
+    result = wait_for_run(repository, task["key"], result["run"]["id"], "completed")
+
     assert result["run"]["state"] == "completed"
     assert result["task"]["status"] == "in_review"
     assert result["task"]["assistant"] == "codex"
@@ -193,6 +199,8 @@ defmodule SymphoniaService.CodexProviderTest do
 
     result = CodingAssistant.start_run(registry_path, repository, task["key"])
 
+    result = wait_for_run(repository, task["key"], result["run"]["id"], "failed")
+
     assert result["run"]["state"] == "failed"
     assert result["task"]["status"] == "paused"
     assert result["task"]["pausedReason"] == "run_failed"
@@ -210,6 +218,8 @@ defmodule SymphoniaService.CodexProviderTest do
     System.put_env("FAKE_CODEX_MODE", "fail")
 
     result = CodingAssistant.start_run(registry_path, repository, task["key"])
+
+    result = wait_for_run(repository, task["key"], result["run"]["id"], "failed")
 
     assert result["run"]["state"] == "failed"
     assert result["task"]["status"] == "paused"
@@ -233,6 +243,8 @@ defmodule SymphoniaService.CodexProviderTest do
 
     result = CodingAssistant.start_run(registry_path, repository, task["key"])
 
+    result = wait_for_run(repository, task["key"], result["run"]["id"], "failed")
+
     assert result["run"]["state"] == "failed"
     assert result["task"]["status"] == "paused"
     assert result["task"]["pausedReason"] == "run_failed"
@@ -255,6 +267,8 @@ defmodule SymphoniaService.CodexProviderTest do
     System.put_env("FAKE_CODEX_MODE", "mixed")
 
     result = CodingAssistant.start_run(registry_path, repository, task["key"])
+
+    result = wait_for_run(repository, task["key"], result["run"]["id"], "completed")
 
     assert result["run"]["state"] == "completed"
     assert result["task"]["handoff"]["filesChanged"] == ["app/codex-output.txt"]
@@ -286,7 +300,8 @@ defmodule SymphoniaService.CodexProviderTest do
     runs_root: runs_root,
     task: task
   } do
-    CodingAssistant.start_run(registry_path, repository, task["key"])
+    initial = CodingAssistant.start_run(registry_path, repository, task["key"])
+    wait_for_run(repository, task["key"], initial["run"]["id"], "completed")
 
     feedback =
       "The card is still too dense. Remove validation from the default card, make the project label smaller, and show retry only when paused."
@@ -296,8 +311,8 @@ defmodule SymphoniaService.CodexProviderTest do
         "feedback" => feedback
       })
 
-    assert result["run"]["state"] == "completed"
-    assert result["task"]["status"] == "in_review"
+    assert result["run"]["state"] in ["queued", "running"]
+    assert wait_for_task_status(repository, task["key"], "in_review")["status"] == "in_review"
 
     prompt = File.read!(prompt_file)
     assert prompt =~ "Continuation input:"
@@ -314,6 +329,39 @@ defmodule SymphoniaService.CodexProviderTest do
 
     assert continuation_run["input"] =~ "- Show the retry action only when the task is paused."
     refute continuation_run["input"] =~ "The card is still too dense"
+  end
+
+  defp wait_for_run(repository, task_key, run_id, state, attempts \\ 80) do
+    run = RunStore.get(run_id)
+    task = TaskStore.get_task(repository, task_key)
+
+    if run && run["state"] == state do
+      %{"run" => RunStore.public(run), "task" => task}
+    else
+      if attempts <= 0 do
+        flunk("run #{run_id} did not reach #{state}; last state: #{inspect(run && run["state"])}")
+      end
+
+      Process.sleep(50)
+      wait_for_run(repository, task_key, run_id, state, attempts - 1)
+    end
+  end
+
+  defp wait_for_task_status(repository, task_key, status, attempts \\ 80) do
+    task = TaskStore.get_task(repository, task_key)
+
+    if task && task["status"] == status do
+      task
+    else
+      if attempts <= 0 do
+        flunk(
+          "task #{task_key} did not reach #{status}; last status: #{inspect(task && task["status"])}"
+        )
+      end
+
+      Process.sleep(50)
+      wait_for_task_status(repository, task_key, status, attempts - 1)
+    end
   end
 
   defp write_fake_codex!(path) do

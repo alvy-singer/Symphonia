@@ -5,16 +5,17 @@ defmodule SymphoniaService.CodingAssistant.LocalDemoProvider do
 
   @behaviour SymphoniaService.CodingAssistant.Provider
 
-  alias SymphoniaService.CodingAssistant.{BranchManager, HandoffBuilder}
+  alias SymphoniaService.CodingAssistant.{BranchManager, HandoffBuilder, RunStore}
 
   @impl true
   def id, do: "local_demo"
 
   @impl true
-  def run(repository, task, _run, params) do
+  def run(repository, task, run, params) do
     if force_failure?(params) do
       {:error, "The Coding Assistant could not produce a reviewable handoff."}
     else
+      RunStore.mark_step(run, "Creating branch")
       file = HandoffBuilder.demo_file(task)
       body = HandoffBuilder.demo_body(task, Map.get(params, "assistant_input"))
       branch = BranchManager.create_and_push_demo_change(repository, task, file, body)

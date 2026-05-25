@@ -16,6 +16,7 @@ import {
   TASK_STATUS_LABELS,
   pausedReasonLabel,
   type ReviewNote,
+  type CodingAssistantRun,
   type ServiceTask,
   type TaskLifecycleEvent,
 } from "@/lib/task-model";
@@ -115,6 +116,38 @@ async function startCodingAssistantRun(
   return data.task;
 }
 
+async function fetchCodingAssistantRun(
+  repoKey: string,
+  taskKey: string,
+  runId: string,
+): Promise<CodingAssistantRun> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/coding-assistant/runs/${encodeURIComponent(runId)}`,
+    { cache: "no-store" },
+  );
+  const data = (await res.json()) as { run?: CodingAssistantRun; error?: string };
+  if (!res.ok || !data.run) throw new Error(data.error ?? "Could not load Coding Assistant run");
+  return data.run;
+}
+
+async function cancelCodingAssistantRun(
+  repoKey: string,
+  taskKey: string,
+  runId: string,
+): Promise<ServiceTask> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/coding-assistant/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+  const data = (await res.json()) as { task?: ServiceTask; error?: string };
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not cancel Coding Assistant run");
+  return data.task;
+}
+
 async function requestTaskChanges(
   repoKey: string,
   taskKey: string,
@@ -150,7 +183,12 @@ type TaskAction =
     }
   | {
       label: string;
-      kind: "coding_assistant_run" | "open_pull_request" | "refresh_pr" | "request_changes";
+      kind:
+        | "coding_assistant_run"
+        | "cancel_run"
+        | "open_pull_request"
+        | "refresh_pr"
+        | "request_changes";
       icon: React.ReactNode;
       primary?: boolean;
     }
@@ -207,7 +245,40 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     };
   }, [repoKey, taskKey]);
 
+  useEffect(() => {
+    if (!task?.run || !isActiveRun(task.run)) return;
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [updatedTask, updatedRun] = await Promise.all([
+          fetchTask(repoKey, task.key),
+          fetchCodingAssistantRun(repoKey, task.key, task.run!.id),
+        ]);
+        if (cancelled) return;
+        const nextTask = { ...updatedTask, run: updatedRun };
+        setTask(nextTask);
+        setTitle(nextTask.title);
+        setBody(nextTask.body);
+        setDirty(false);
+      } catch {
+        if (!cancelled) {
+          const updatedTask = await fetchTask(repoKey, task.key);
+          if (!cancelled) setTask(updatedTask);
+        }
+      }
+    };
+
+    const interval = window.setInterval(refresh, 2000);
+    void refresh();
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [repoKey, task?.key, task?.run?.id, task?.run?.state]);
+
   const pausedReason = pausedReasonLabel(task?.pausedReason);
+  const activeRun = task?.run && isActiveRun(task.run) ? task.run : null;
 
   const save = async () => {
     if (!task) return;
@@ -269,6 +340,8 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       const updated =
         action.kind === "coding_assistant_run"
           ? await startCodingAssistantRun(repoKey, task.key)
+          : action.kind === "cancel_run" && task.run
+          ? await cancelCodingAssistantRun(repoKey, task.key, task.run.id)
           : action.kind === "open_pull_request"
           ? await openPullRequest(repoKey, task.key)
           : await refreshPullRequest(repoKey, task.key);
@@ -355,9 +428,12 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         </div>
       )}
 
-      {pending === "coding_assistant_run" && (
+      {(pending === "coding_assistant_run" || activeRun) && (
         <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
-          The Coding Assistant is working on this task.
+          <span>The Coding Assistant is working on this task.</span>
+          {activeRun?.currentStep && (
+            <span className="ml-2 text-foreground">{activeRun.currentStep}</span>
+          )}
         </div>
       )}
 
@@ -367,6 +443,14 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
             "Changes requested. Clarise turned your feedback into requested changes, and the Coding Assistant is continuing the task."}
         </div>
       )}
+
+      {task.status === "paused" &&
+        task.pausedReason === "waiting_for_user" &&
+        task.pausedExplanation && (
+          <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+            {task.pausedExplanation}
+          </div>
+        )}
 
       <div className="flex flex-1 min-h-0">
         <main className="min-w-0 flex-1 overflow-y-auto">
@@ -568,7 +652,9 @@ function TaskMeta({ task }: { task: ServiceTask }) {
         <Section title="Run">
           <div className="space-y-1 text-muted-foreground">
             <p className="font-mono text-[11px]">{task.run.id}</p>
-            <p>{task.run.state}</p>
+            <p>{task.run.label ?? task.run.state}</p>
+            {task.run.currentStep && <p>{task.run.currentStep}</p>}
+            {task.run.message && <p>{task.run.message}</p>}
           </div>
         </Section>
       )}
@@ -660,7 +746,15 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
         },
       ];
     case "in_progress":
-      return [];
+      return task.run && isActiveRun(task.run)
+        ? [
+            {
+              label: "Cancel run",
+              kind: "cancel_run",
+              icon: <XCircle className="h-3.5 w-3.5" />,
+            },
+          ]
+        : [];
     case "paused":
       if (task.pausedReason !== "run_failed") return [];
       return [
@@ -726,4 +820,8 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "canceled":
       return [];
   }
+}
+
+function isActiveRun(run: CodingAssistantRun): boolean {
+  return run.state === "queued" || run.state === "running";
 }

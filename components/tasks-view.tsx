@@ -94,6 +94,24 @@ async function startCodingAssistantRun(repoKey: string, taskKey: string): Promis
   return payload.task;
 }
 
+async function cancelCodingAssistantRun(
+  repoKey: string,
+  taskKey: string,
+  runId: string,
+): Promise<ServiceTask> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/coding-assistant/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+  const payload = (await res.json()) as { task?: ServiceTask; error?: string };
+  if (!res.ok || !payload.task) {
+    throw new Error(payload.error ?? "Could not cancel Coding Assistant run");
+  }
+  return payload.task;
+}
+
 type TaskAction =
   | {
       label: string;
@@ -104,7 +122,7 @@ type TaskAction =
     }
   | {
       label: string;
-      kind: "coding_assistant_run" | "open_pull_request" | "refresh_pr";
+      kind: "coding_assistant_run" | "cancel_run" | "open_pull_request" | "refresh_pr";
       primary?: boolean;
     }
   | {
@@ -133,6 +151,7 @@ function TaskCard({
   pending: boolean;
 }) {
   const pausedReason = pausedReasonLabel(task.pausedReason);
+  const activeRun = task.run && isActiveRun(task.run) ? task.run : null;
   return (
     <article className="rounded-md border bg-card p-2.5 text-card-foreground shadow-sm transition-colors hover:border-foreground/20">
       <Link href={`/r/${repoSlug}/tasks/${encodeURIComponent(task.key)}`} className="block">
@@ -150,6 +169,11 @@ function TaskCard({
           {task.githubPrState === "open" && (
             <span className="inline-flex items-center rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-600 dark:text-violet-400">
               PR Open
+            </span>
+          )}
+          {activeRun && (
+            <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-600 dark:text-sky-400">
+              {activeRun.currentStep ?? activeRun.label ?? "Working"}
             </span>
           )}
           {task.project && (
@@ -183,6 +207,7 @@ function TaskRow({
   pending: boolean;
 }) {
   const pausedReason = pausedReasonLabel(task.pausedReason);
+  const activeRun = task.run && isActiveRun(task.run) ? task.run : null;
   return (
     <div className="grid grid-cols-[1.5rem_4.5rem_1fr_auto] items-center gap-3 border-b px-4 py-2 last:border-b-0 hover:bg-muted/40">
       <Link
@@ -205,6 +230,11 @@ function TaskRow({
         {task.githubPrState === "open" && (
           <span className="hidden md:inline-flex rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-600 dark:text-violet-400">
             PR Open
+          </span>
+        )}
+        {activeRun && (
+          <span className="hidden md:inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-600 dark:text-sky-400">
+            {activeRun.currentStep ?? activeRun.label ?? "Working"}
           </span>
         )}
         {task.assignee && <UserAvatar user={task.assignee} size={20} />}
@@ -273,6 +303,26 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     return () =>
       window.removeEventListener("symphonia:viewMode", handler as EventListener);
   }, [repoKey]);
+
+  useEffect(() => {
+    if (!tasks.some((task) => task.run && isActiveRun(task.run))) return;
+
+    let cancelled = false;
+    const interval = window.setInterval(() => {
+      fetchTasks(repoKey)
+        .then((nextTasks) => {
+          if (!cancelled) setTasks(nextTasks);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : "Could not load tasks");
+        });
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [repoKey, tasks]);
 
   const setMode = (mode: "board" | "list") => {
     setView(mode);
@@ -345,6 +395,8 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           ? await postTaskEvent(repoKey, task.key, action.event, eventParams)
           : action.kind === "coding_assistant_run"
             ? await startCodingAssistantRun(repoKey, task.key)
+            : action.kind === "cancel_run" && task.run
+            ? await cancelCodingAssistantRun(repoKey, task.key, task.run.id)
             : action.kind === "open_pull_request"
             ? await openPullRequest(repoKey, task.key)
             : await refreshPullRequest(repoKey, task.key);
@@ -608,7 +660,9 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "todo":
       return [{ label: "Assign", kind: "coding_assistant_run", primary: true }];
     case "in_progress":
-      return [];
+      return task.run && isActiveRun(task.run)
+        ? [{ label: "Cancel run", kind: "cancel_run" }]
+        : [];
     case "paused":
       return task.pausedReason === "run_failed"
         ? [{ label: "Retry", kind: "coding_assistant_run", primary: true }]
@@ -631,4 +685,8 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "canceled":
       return [];
   }
+}
+
+function isActiveRun(run: ServiceTask["run"]): boolean {
+  return run?.state === "queued" || run?.state === "running";
 }

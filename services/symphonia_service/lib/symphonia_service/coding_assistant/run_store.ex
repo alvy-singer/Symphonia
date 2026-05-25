@@ -3,7 +3,9 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
   Local private store for Coding Assistant run records.
   """
 
-  @states ~w(queued running completed failed)
+  alias SymphoniaService.CodingAssistant.RunEvents
+
+  @states ~w(queued running completed failed canceled)
 
   def states, do: @states
 
@@ -21,6 +23,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
         "updated_at" => now,
         "started_at" => nil,
         "completed_at" => nil,
+        "current_step" => RunEvents.default_step("queued"),
         "raw_log" => []
       }
       |> Map.merge(optional_attrs(attrs))
@@ -33,8 +36,21 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     now = now()
 
     run
-    |> Map.merge(%{"state" => "running", "started_at" => now, "updated_at" => now})
+    |> Map.merge(%{
+      "state" => "running",
+      "started_at" => now,
+      "updated_at" => now,
+      "current_step" => RunEvents.default_step("running")
+    })
     |> append_log("Coding Assistant run started.")
+    |> save(opts)
+  end
+
+  def mark_step(run, step, opts \\ []) when is_binary(step) do
+    run
+    |> reload(opts)
+    |> Map.merge(%{"current_step" => step, "updated_at" => now()})
+    |> append_log(step)
     |> save(opts)
   end
 
@@ -47,13 +63,14 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "state" => "completed",
       "completed_at" => now,
       "updated_at" => now,
+      "current_step" => RunEvents.default_step("completed"),
       "handoff" => handoff
     })
     |> append_log("Coding Assistant run completed.")
     |> save(opts)
   end
 
-  def mark_failed(run, reason, opts \\ []) do
+  def mark_failed(run, reason, public_message \\ nil, opts \\ []) do
     now = now()
 
     run
@@ -62,9 +79,29 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "state" => "failed",
       "completed_at" => now,
       "updated_at" => now,
+      "current_step" => RunEvents.default_step("failed"),
+      "message" => public_message,
       "error" => reason
     })
+    |> reject_nil()
     |> append_log("Coding Assistant run failed: #{reason}")
+    |> save(opts)
+  end
+
+  def mark_canceled(run, reason \\ "waiting_for_user", opts \\ []) do
+    now = now()
+
+    run
+    |> reload(opts)
+    |> Map.merge(%{
+      "state" => "canceled",
+      "completed_at" => now,
+      "updated_at" => now,
+      "current_step" => RunEvents.default_step("canceled"),
+      "message" => "Run canceled. The task is paused. You can retry when ready.",
+      "canceled_reason" => reason
+    })
+    |> append_log("Coding Assistant run canceled.")
     |> save(opts)
   end
 
@@ -81,10 +118,36 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     %{
       "id" => run["id"],
       "state" => run["state"],
+      "label" => RunEvents.label(run["state"]),
+      "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
+      "message" => RunEvents.public_message(run),
       "startedAt" => run["started_at"],
       "completedAt" => run["completed_at"]
     }
     |> reject_nil()
+  end
+
+  def get(id, opts \\ []) when is_binary(id) do
+    path = Path.join(root(opts), "#{id}.json")
+
+    case File.read(path) do
+      {:ok, body} -> JSON.decode!(body)
+      {:error, :enoent} -> nil
+      {:error, reason} -> raise File.Error, reason: reason, action: "read file", path: path
+    end
+  end
+
+  def get!(id, opts \\ []) do
+    get(id, opts) || raise ArgumentError, "Run #{id} not found."
+  end
+
+  def list(opts \\ []) do
+    opts
+    |> root()
+    |> Path.join("run_*.json")
+    |> Path.wildcard()
+    |> Enum.sort()
+    |> Enum.map(&JSON.decode!(File.read!(&1)))
   end
 
   def path(run, opts \\ []) do
@@ -124,7 +187,9 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "input",
       "review_note_id",
       "attempt",
-      "max_attempts"
+      "max_attempts",
+      "message",
+      "current_step"
     ])
   end
 

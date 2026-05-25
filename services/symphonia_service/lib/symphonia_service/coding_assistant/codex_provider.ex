@@ -30,12 +30,13 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
       with {:ok, _bin} <- codex_executable(),
            :ok <- branch_preflight(repository, task) do
         BranchManager.with_task_branch_worktree(repository, task, fn context ->
+          RunStore.mark_step(run, "Preparing repository")
           prompt = build_prompt(repository, task, context, params)
 
           with {:ok, output} <- invoke_codex(run, context.repo_path, prompt),
                {:ok, changes} <- detect_and_clean_changes(run, context.repo_path),
                :ok <- ensure_committable_changes(changes),
-               :ok <- commit_and_push(context, task, changes) do
+               :ok <- commit_and_push(run, context, task, changes) do
             handoff =
               HandoffBuilder.build_from_changes(
                 task,
@@ -61,6 +62,7 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
   end
 
   defp detect_and_clean_changes(run, repo_path) do
+    RunStore.mark_step(run, "Detecting changed files")
     changes = ChangeDetector.detect!(repo_path)
     RunStore.record_provider_output(run, %{"change_detection" => changes})
     BranchManager.revert_paths!(repo_path, changes["excluded"])
@@ -75,7 +77,8 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
 
   defp ensure_committable_changes(_changes), do: :ok
 
-  defp commit_and_push(context, task, changes) do
+  defp commit_and_push(run, context, task, changes) do
+    RunStore.mark_step(run, "Creating branch")
     BranchManager.commit_files!(context, task, changes["committable"])
     BranchManager.push_task_branch!(context)
     :ok

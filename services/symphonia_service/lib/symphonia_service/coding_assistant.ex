@@ -1,22 +1,24 @@
 defmodule SymphoniaService.CodingAssistant do
   @moduledoc """
-  Facade for assigning tasks to Coding Assistants.
+  Facade for assigning tasks to the background Coding Assistant.
   """
 
   alias SymphoniaService.Clarise.{ChecklistSerializer, FeedbackStructurer, ReviewNotesBuilder}
 
   alias SymphoniaService.CodingAssistant.{
+    Cancellation,
     CodexProvider,
-    HandoffBuilder,
     LocalDemoProvider,
-    RunStore
+    RunEvents,
+    RunStore,
+    RunSupervisor
   }
 
   alias SymphoniaService.TaskStore
 
   @continuation_max_attempts 2
 
-  def start_run(_registry_path, repository, task_key, params \\ %{}) do
+  def start_run(registry_path, repository, task_key, params \\ %{}) do
     task = get_task!(repository, task_key)
     ensure_assignable!(task)
 
@@ -26,35 +28,28 @@ defmodule SymphoniaService.CodingAssistant do
       RunStore.create(%{
         "provider" => provider_id(provider),
         "repository" => repository["key"],
-        "task" => task_key
+        "task" => task_key,
+        "kind" => "assignment"
       })
 
-    running_run = RunStore.mark_running(run)
     TaskStore.apply_event(repository, task_key, "start")
+    task = put_task_run(repository, task_key, run)
 
-    case provider.run(repository, task, running_run, params) do
-      {:ok, handoff} ->
-        completed_run = RunStore.mark_completed(running_run, handoff)
-        task = HandoffBuilder.apply(repository, task_key, completed_run, handoff)
-        %{"run" => RunStore.public(completed_run), "task" => task}
+    {:ok, _pid} =
+      RunSupervisor.start_run(%{
+        "registry_path" => registry_path,
+        "repository" => repository,
+        "task_key" => task_key,
+        "provider" => provider,
+        "params" => params,
+        "kind" => "assignment",
+        "run" => run
+      })
 
-      {:error, reason} ->
-        failed_run = RunStore.mark_failed(running_run, reason)
-
-        task =
-          TaskStore.apply_event(repository, task_key, "fail_run", %{
-            "explanation" =>
-              failure_explanation(
-                reason,
-                "The Coding Assistant could not produce a reviewable handoff."
-              )
-          })
-
-        %{"run" => RunStore.public(failed_run), "task" => task}
-    end
+    %{"run" => RunStore.public(run), "task" => task}
   end
 
-  def continue_from_review_notes(_registry_path, repository, task_key, params \\ %{}) do
+  def continue_from_review_notes(registry_path, repository, task_key, params \\ %{}) do
     task = get_task!(repository, task_key)
     ensure_reviewable!(task)
 
@@ -67,14 +62,80 @@ defmodule SymphoniaService.CodingAssistant do
 
     review_note = ReviewNotesBuilder.build(feedback, requested_changes)
     assistant_input = ChecklistSerializer.serialize(requested_changes)
-
     continuation = continuation_state(review_note["id"], 1)
     ReviewNotesBuilder.apply(repository, task_key, review_note, continuation)
 
-    {run, task} =
-      run_continuation_attempt(repository, task_key, review_note, assistant_input, params, 1)
+    provider = provider()
+
+    run =
+      RunStore.create(%{
+        "provider" => provider_id(provider),
+        "repository" => repository["key"],
+        "task" => task_key,
+        "kind" => "review_continuation",
+        "input" => assistant_input,
+        "review_note_id" => review_note["id"],
+        "attempt" => 1,
+        "max_attempts" => @continuation_max_attempts
+      })
+
+    task = put_task_run(repository, task_key, run)
+
+    {:ok, _pid} =
+      RunSupervisor.start_run(%{
+        "registry_path" => registry_path,
+        "repository" => repository,
+        "task_key" => task_key,
+        "provider" => provider,
+        "params" => params,
+        "kind" => "review_continuation",
+        "assistant_input" => assistant_input,
+        "review_note_id" => review_note["id"],
+        "attempt" => 1,
+        "max_attempts" => @continuation_max_attempts,
+        "run" => run
+      })
 
     %{"review_note" => review_note, "run" => RunStore.public(run), "task" => task}
+  end
+
+  def get_run(repository, task_key, run_id) do
+    case RunStore.get(run_id) do
+      nil ->
+        raise ArgumentError, "Run #{run_id} not found."
+
+      run ->
+        if run["repository"] == repository["key"] and run["task"] == task_key do
+          RunStore.public(run)
+        else
+          raise ArgumentError, "Run #{run_id} does not belong to task #{task_key}."
+        end
+    end
+  end
+
+  def cancel_run(repository, task_key, run_id) do
+    case RunStore.get(run_id) do
+      nil ->
+        raise ArgumentError, "Run #{run_id} not found."
+
+      run ->
+        if run["repository"] != repository["key"] or run["task"] != task_key do
+          raise ArgumentError, "Run #{run_id} does not belong to task #{task_key}."
+        else
+          if RunEvents.terminal?(run) do
+            %{"run" => RunStore.public(run), "task" => TaskStore.get_task(repository, task_key)}
+          else
+            case Cancellation.cancel(run_id) do
+              {:ok, result} -> result
+              {:error, reason} -> raise ArgumentError, reason
+            end
+          end
+        end
+    end
+  end
+
+  def recover_interrupted_runs(registry_path, opts \\ []) do
+    RunSupervisor.recover_interrupted_runs(registry_path, opts)
   end
 
   defp get_task!(repository, task_key) do
@@ -86,116 +147,17 @@ defmodule SymphoniaService.CodingAssistant do
 
   defp ensure_assignable!(%{"status" => "todo"}), do: :ok
   defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "run_failed"}), do: :ok
+  defp ensure_assignable!(%{"status" => "paused", "pausedReason" => "waiting_for_user"}), do: :ok
 
   defp ensure_assignable!(_task) do
     raise ArgumentError,
-          "Assign to Coding Assistant is available for To-do and Paused · Run failed tasks."
+          "Assign to Coding Assistant is available for To-do and Paused tasks."
   end
 
   defp ensure_reviewable!(%{"status" => "in_review"}), do: :ok
 
   defp ensure_reviewable!(_task) do
     raise ArgumentError, "Request changes is available for In Review tasks."
-  end
-
-  defp run_continuation_attempt(
-         repository,
-         task_key,
-         review_note,
-         assistant_input,
-         params,
-         attempt
-       ) do
-    provider = provider()
-    task = get_task!(repository, task_key)
-
-    run =
-      RunStore.create(%{
-        "provider" => provider_id(provider),
-        "repository" => repository["key"],
-        "task" => task_key,
-        "kind" => "review_continuation",
-        "input" => assistant_input,
-        "review_note_id" => review_note["id"],
-        "attempt" => attempt,
-        "max_attempts" => @continuation_max_attempts
-      })
-
-    running_run = RunStore.mark_running(run)
-    provider_params = provider_params(params, assistant_input, review_note, attempt)
-
-    case provider.run(repository, task, running_run, provider_params) do
-      {:ok, handoff} ->
-        completed_run = RunStore.mark_completed(running_run, handoff)
-        task = HandoffBuilder.apply(repository, task_key, completed_run, handoff)
-        {completed_run, task}
-
-      {:error, reason} ->
-        failed_run = RunStore.mark_failed(running_run, reason)
-
-        if attempt < @continuation_max_attempts do
-          TaskStore.patch_task(repository, task_key, %{
-            "frontmatter" => %{
-              "review_continuation" => continuation_state(review_note["id"], attempt + 1)
-            }
-          })
-
-          run_continuation_attempt(
-            repository,
-            task_key,
-            review_note,
-            assistant_input,
-            params,
-            attempt + 1
-          )
-        else
-          TaskStore.apply_event(repository, task_key, "fail_run", %{
-            "explanation" =>
-              failure_explanation(
-                reason,
-                "The Coding Assistant could not produce a new handoff after your requested changes."
-              )
-          })
-
-          task =
-            TaskStore.patch_task(repository, task_key, %{
-              "frontmatter" => %{
-                "run" => run_frontmatter(failed_run),
-                "review_continuation" => continuation_state(review_note["id"], attempt)
-              }
-            })
-
-          {failed_run, task}
-        end
-    end
-  end
-
-  defp provider_params(params, assistant_input, review_note, attempt) do
-    %{
-      "assistant_input" => assistant_input,
-      "review_note_id" => review_note["id"],
-      "continuation" => true,
-      "forceFailure" => force_failure?(params, attempt)
-    }
-  end
-
-  defp force_failure?(params, attempt) do
-    cond do
-      Map.get(params, "forceFailure") == true or Map.get(params, "force_failure") == true ->
-        true
-
-      Map.get(params, "forceFailureOnce") == true or Map.get(params, "force_failure_once") == true ->
-        attempt == 1
-
-      is_integer(Map.get(params, "forceFailureAttempts")) ->
-        attempt <= Map.get(params, "forceFailureAttempts")
-
-      is_integer(Map.get(params, "force_failure_attempts")) ->
-        attempt <= Map.get(params, "force_failure_attempts")
-
-      true ->
-        false
-    end
   end
 
   defp required_feedback!(params) do
@@ -217,13 +179,26 @@ defmodule SymphoniaService.CodingAssistant do
     }
   end
 
+  defp put_task_run(repository, task_key, run) do
+    TaskStore.patch_task(repository, task_key, %{
+      "frontmatter" => %{
+        "assistant" => run["provider"] || "coding_assistant",
+        "run" => run_frontmatter(run)
+      }
+    })
+  end
+
   defp run_frontmatter(run) do
     %{
       "id" => run["id"],
       "state" => run["state"],
+      "current_step" => run["current_step"],
+      "message" => RunEvents.public_message(run),
       "started_at" => run["started_at"],
       "completed_at" => run["completed_at"]
     }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
   end
 
   defp provider do
@@ -242,21 +217,4 @@ defmodule SymphoniaService.CodingAssistant do
       "coding_assistant"
     end
   end
-
-  defp failure_explanation(reason, fallback) when is_binary(reason) do
-    reason = String.trim(reason)
-
-    if public_failure_reason?(reason) do
-      reason
-    else
-      fallback
-    end
-  end
-
-  defp failure_explanation(_reason, fallback), do: fallback
-
-  defp public_failure_reason?("The Coding Assistant can't start" <> _rest), do: true
-  defp public_failure_reason?("The Coding Assistant did not produce" <> _rest), do: true
-  defp public_failure_reason?("The Coding Assistant could not finish" <> _rest), do: true
-  defp public_failure_reason?(_reason), do: false
 end

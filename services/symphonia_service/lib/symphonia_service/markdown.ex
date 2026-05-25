@@ -68,7 +68,7 @@ defmodule SymphoniaService.Markdown do
 
   @nested_orders %{
     "review_continuation" => ["attempt", "max_attempts", "source_review_note_id"],
-    "run" => ["id", "state", "started_at", "completed_at"],
+    "run" => ["id", "state", "current_step", "message", "started_at", "completed_at"],
     "github" => ["repo", "issue", "pull_request"],
     "repo" => ["owner", "name", "url"],
     "issue" => ["owner", "repo", "number", "url", "state"],

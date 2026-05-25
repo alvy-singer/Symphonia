@@ -4,6 +4,7 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
   """
 
   alias SymphoniaService.TaskStore
+  alias SymphoniaService.CodingAssistant.RunEvents
 
   def demo_file(task) do
     Path.join(["symphonia", "demo-output", "#{task["key"]}.md"])
@@ -63,12 +64,17 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
         "files_changed" => handoff["files_changed"],
         "next_review_action" => handoff["next_review_action"],
         "next_step" => nil,
-        "run" => %{
-          "id" => run["id"],
-          "state" => run["state"],
-          "started_at" => run["started_at"],
-          "completed_at" => run["completed_at"]
-        },
+        "run" =>
+          %{
+            "id" => run["id"],
+            "state" => run["state"],
+            "current_step" => run["current_step"],
+            "message" => RunEvents.public_message(run),
+            "started_at" => run["started_at"],
+            "completed_at" => run["completed_at"]
+          }
+          |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+          |> Map.new(),
         "handoff" => handoff
       }
     })

@@ -133,6 +133,18 @@ function applyLifecycle(
         },
         body,
       };
+    case "pause_run":
+      return {
+        frontmatter: {
+          ...base,
+          status: "paused",
+          paused_reason: "waiting_for_user",
+          paused_explanation:
+            stringParam(params.explanation) ??
+            "Run canceled. The task is paused. You can retry when ready.",
+        },
+        body,
+      };
     case "approve": {
       const requiresPr = params.requires_pr !== false && params.requiresPr !== false;
       return {

@@ -74,6 +74,22 @@ defmodule SymphoniaService.Lifecycle do
 
           {frontmatter, body}
 
+        "pause_run" ->
+          explanation =
+            Map.get(params, "explanation") ||
+              "Run canceled. The task is paused. You can retry when ready."
+
+          frontmatter =
+            frontmatter
+            |> put_common(now)
+            |> Map.merge(%{
+              "status" => "paused",
+              "paused_reason" => "waiting_for_user",
+              "paused_explanation" => explanation
+            })
+
+          {frontmatter, body}
+
         "approve" ->
           requires_pr = Map.get(params, "requires_pr", true)
 

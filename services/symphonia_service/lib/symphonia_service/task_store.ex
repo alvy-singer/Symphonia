@@ -4,6 +4,7 @@ defmodule SymphoniaService.TaskStore do
   """
 
   alias SymphoniaService.{Lifecycle, Markdown, RepositoryRegistry}
+  alias SymphoniaService.CodingAssistant.RunEvents
 
   def list_tasks(repository) when is_map(repository) do
     repository
@@ -320,6 +321,9 @@ defmodule SymphoniaService.TaskStore do
     %{
       "id" => run["id"],
       "state" => run["state"],
+      "label" => RunEvents.label(run["state"]),
+      "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
+      "message" => RunEvents.public_message(run),
       "startedAt" => run["started_at"],
       "completedAt" => run["completed_at"]
     }
