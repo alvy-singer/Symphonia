@@ -126,7 +126,7 @@ async function startCodingAssistantRun(repoKey: string, taskKey: string): Promis
   );
   const payload = (await res.json()) as { task?: ServiceTask; error?: string };
   if (!res.ok || !payload.task) {
-    throw new Error(payload.error ?? "Could not start Coding Assistant");
+    throw new Error(payload.error ?? "Could not start Clarise");
   }
   return payload.task;
 }
@@ -144,7 +144,7 @@ async function cancelCodingAssistantRun(
   );
   const payload = (await res.json()) as { task?: ServiceTask; error?: string };
   if (!res.ok || !payload.task) {
-    throw new Error(payload.error ?? "Could not cancel Coding Assistant run");
+    throw new Error(payload.error ?? "Could not cancel Clarise run");
   }
   return payload.task;
 }
@@ -341,7 +341,7 @@ async function initializeWorkspace(repoKey: string): Promise<WorkspaceState> {
 }
 
 /**
- * Repository Overview — Tasks board/list, the locked default landing view.
+ * Repository Tasks board/list, the locked default landing view.
  *
  * - Board is the default mode and the chosen mode is remembered per repo
  *   in localStorage (and is also driven by the command palette).
@@ -755,7 +755,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                   ))}
                   {grouped[s].length === 0 && (
                     <div className="rounded-md border border-dashed p-3 text-center text-[11px] text-muted-foreground">
-                      No tasks
+                      Tasks are units of work. Create one, or connect GitHub to import issues.
                     </div>
                   )}
                 </div>

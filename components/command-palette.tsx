@@ -151,7 +151,7 @@ export function CommandPaletteProvider({
       cmds.push(
         {
           id: "nav-tasks",
-          label: "Tasks (Overview)",
+          label: "Tasks",
           hint: repoForActions,
           group: "Navigate",
           icon: <Layers className="h-3.5 w-3.5" />,
@@ -200,8 +200,8 @@ export function CommandPaletteProvider({
         },
         {
           id: "nav-workflow",
-          label: "Open WORKFLOW.md",
-          hint: "Repository root",
+          label: "Automation Rules",
+          hint: repoForActions,
           group: "Navigate",
           icon: <GitBranch className="h-3.5 w-3.5" />,
           run: () => router.push(`/r/${s}/workflow`),
@@ -210,7 +210,7 @@ export function CommandPaletteProvider({
         {
           id: "create-task",
           label: "New Task",
-          hint: "Create Markdown task",
+          hint: "Create a task",
           group: "Create",
           icon: <Plus className="h-3.5 w-3.5" />,
           run: () => onNewTask?.(repoForActions),
@@ -258,7 +258,7 @@ export function CommandPaletteProvider({
         {
           id: "action-clarise",
           label: "Ask Clarise",
-          hint: "Workspace assistant",
+          hint: "AI planning",
           group: "Action",
           icon: <Sparkles className="h-3.5 w-3.5 text-violet-500" />,
           run: () => onAskClarise?.(),

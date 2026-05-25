@@ -18,7 +18,7 @@ interface Props {
 }
 
 /**
- * Styled confirmation dialog used in place of `window.confirm()`. Matches the
+ * Styled confirmation dialog used in place of native browser prompts. Matches the
  * application's dark/light theme and supports a destructive action variant.
  */
 export function ConfirmDialog({

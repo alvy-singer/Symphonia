@@ -33,7 +33,7 @@ const SUGGESTIONS = [
   "Draft a task brief for the next priority",
   "Draft acceptance criteria from these notes",
   "Summarize the latest run on this task",
-  "Draft a decision: Markdown is the source of truth",
+  "Draft a decision: repository documents are the source of truth",
 ];
 
 interface ClariseCtxValue {
@@ -83,7 +83,7 @@ export function Clarise({ repoKey }: { repoKey: string }) {
     {
       id: "m0",
       role: "clarise",
-      content: `Hi — I'm Clarise. I can help draft starter codebase maps, milestones, decisions, requirements, plans, tasks, reviews, run summaries, or WORKFLOW.md for ${repoKey}.`,
+      content: `Hi — I'm Clarise. I can help draft starter codebase maps, milestones, decisions, requirements, plans, tasks, reviews, run summaries, or automation rules for ${repoKey}.`,
     },
   ]);
   const [draft, setDraft] = useState("");
@@ -140,7 +140,7 @@ export function Clarise({ repoKey }: { repoKey: string }) {
           {
             id: `e${Date.now()}`,
             role: "clarise",
-            content: err instanceof Error ? err.message : "Could not create workspace file.",
+            content: err instanceof Error ? err.message : "Could not create document.",
           },
         ]);
       }
@@ -232,7 +232,7 @@ export function Clarise({ repoKey }: { repoKey: string }) {
                   </>
                 ) : (
                   <>
-                    <span className="text-[11px] text-muted-foreground">Workspace:</span>
+                    <span className="text-[11px] text-muted-foreground">Planning:</span>
                     <DraftPill onClick={() => void handleSaveAsDraft(m)}>
                       {specActionLabel(m.saveable.specAction)}
                     </DraftPill>
@@ -343,7 +343,7 @@ async function createSpecArtifact(
     error?: string;
   };
   if (!res.ok || !payload.artifact) {
-    throw new Error(payload.error ?? "Could not create workspace file.");
+    throw new Error(payload.error ?? "Could not create document.");
   }
   return payload.artifact;
 }
@@ -371,12 +371,12 @@ function respond(prompt: string, repo: string): Pick<Message, "content" | "savea
   if (p.includes("workflow") || p.includes("workflow.md")) {
     return {
       content:
-        "# WORKFLOW.md\n# Review-first — humans review the run summary in Symphonía before any PR.\n\n" +
+        "# Automation rules\n# Review-first — humans review the run summary in Symphonía before any PR.\n\n" +
         "on_task_started:\n  - assign: claude\n  - require_review: true\n\n" +
         "on_run_complete:\n  - status: in_review\n  - request_review_from: assignees\n\n" +
         "on_review_approved:\n  - open_pr: true\n\n" +
         "on_pr_merged:\n  - status: completed\n",
-      saveable: { category: "workflow", suggestedTitle: "WORKFLOW.md" },
+      saveable: { category: "workflow", suggestedTitle: "Automation rules" },
     };
   }
 
@@ -434,15 +434,15 @@ function respond(prompt: string, repo: string): Pick<Message, "content" | "savea
   if (p.includes("decision")) {
     return {
       content:
-        "# Markdown is the source of truth\n\n**Status:** Proposed\n\n" +
-        "## Context\n\nWe want durable, reviewable, portable workspace memory.\n\n" +
-        "## Decision\n\nTasks, Projects, Docs, Decisions, Reviews and Run Summaries are stored as Markdown in the repository. " +
+        "# Repository documents are the source of truth\n\n**Status:** Proposed\n\n" +
+        "## Context\n\nWe want durable, reviewable planning records.\n\n" +
+        "## Decision\n\nTasks, Projects, Docs, Decisions, Reviews and Run Summaries are stored in the repository. " +
         "GitHub/Linear issues are linked projections only.\n\n" +
-        "## Why\n\nMarkdown diffs cleanly in PRs and survives tool changes.\n\n" +
-        "## Consequences\n\n- Workspace memory lives next to code.\n- We cannot rely on database-only state.\n",
+        "## Why\n\nRepository-backed records review cleanly in pull requests and survive tool changes.\n\n" +
+        "## Consequences\n\n- Planning memory lives next to code.\n- We cannot rely on database-only state.\n",
       saveable: {
         specAction: "decision_record",
-        suggestedTitle: "Markdown is the source of truth",
+        suggestedTitle: "Repository documents are the source of truth",
       },
     };
   }
@@ -450,12 +450,12 @@ function respond(prompt: string, repo: string): Pick<Message, "content" | "savea
   if (p.includes("summary") || p.includes("summarize") || p.includes("run")) {
     return {
       content:
-        "# Codex run — overview card density\n\n**Coding Assistant:** Codex\n\n" +
+        "# Clarise run - overview card density\n\n**Assistant:** Clarise\n\n" +
         "**Files changed:** 4\n\n**Summary.** Tightened card padding, switched to tabular numerals " +
         "for IDs, and added a 2-line clamp on titles.\n\n**Validation.** Tests passed. Lint clean.\n",
       saveable: {
         category: "run-summary",
-        suggestedTitle: "Codex run — overview card density",
+        suggestedTitle: "Clarise run - overview card density",
       },
     };
   }
@@ -463,12 +463,12 @@ function respond(prompt: string, repo: string): Pick<Message, "content" | "savea
   if (p.includes("review")) {
     return {
       content:
-        "# Overview redesign — review notes\n\n## Went well\n\n- Board default feels right.\n\n" +
+        "# Tasks redesign - review notes\n\n## Went well\n\n- Board default feels right.\n\n" +
         "## Needs work\n\n- Long titles still wrap awkwardly on narrow viewports.\n\n" +
         "## Follow-ups\n\n- Add filters by assignee.",
       saveable: {
         category: "review",
-        suggestedTitle: "Overview redesign — review notes",
+        suggestedTitle: "Tasks redesign - review notes",
       },
     };
   }

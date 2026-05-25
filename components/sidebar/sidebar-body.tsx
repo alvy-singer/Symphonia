@@ -89,8 +89,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2.5">
         <Link
-          href="/"
-          onClick={handleNav}
+          href="/" onClick={handleNav} title="Return to all repositories"
           className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-sidebar-accent"
         >
           <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-foreground text-xs font-bold text-background">
@@ -124,8 +123,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
 
       <div className="flex-1 space-y-3 overflow-y-auto px-2 py-2">
         <Link
-          href="/"
-          onClick={handleNav}
+          href="/" onClick={handleNav} title="Return to all repositories"
           className="flex items-center gap-2 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
         >
           <ArrowLeft className="h-3 w-3" />
@@ -242,6 +240,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
                   key={t.key}
                   href={`/r/${t.key.toLowerCase()}/tasks`}
                   onClick={handleNav}
+                  title={`Open ${t.name}`}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px] transition-colors",
                     active

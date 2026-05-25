@@ -79,7 +79,7 @@ const allNotifications: Notification[] = [
     type: "review",
     actor: users[2],
     title: "requested your review on a run summary",
-    preview: "Codex completed SYM-141 — ready for your review.",
+    preview: "Clarise completed SYM-141 and it is ready for your review.",
     target: "SYM-141",
     time: "3h",
     read: false,
@@ -303,10 +303,7 @@ export function InboxView({ repoKey }: { repoKey: string }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button
-                    aria-label="Star"
-                    className="grid h-7 w-7 place-items-center rounded-md hover:bg-accent text-muted-foreground"
-                  >
+                  <button aria-label="Star" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60">
                     <Star
                       className={cn(
                         "h-3.5 w-3.5",
@@ -314,16 +311,10 @@ export function InboxView({ repoKey }: { repoKey: string }) {
                       )}
                     />
                   </button>
-                  <button
-                    aria-label="Subscribe"
-                    className="grid h-7 w-7 place-items-center rounded-md hover:bg-accent text-muted-foreground"
-                  >
+                  <button aria-label="Subscribe" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60">
                     <Bell className="h-3.5 w-3.5" />
                   </button>
-                  <button
-                    aria-label="Archive"
-                    className="grid h-7 w-7 place-items-center rounded-md hover:bg-accent text-muted-foreground"
-                  >
+                  <button aria-label="Archive" disabled title="Coming soon" className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60">
                     <Archive className="h-3.5 w-3.5" />
                   </button>
                 </div>

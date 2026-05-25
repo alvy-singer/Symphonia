@@ -2,11 +2,7 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Dialog,
-  DialogPortal,
-  DialogOverlay,
-} from "@/components/ui/dialog";
+import { Dialog, DialogPortal, DialogOverlay } from "@/components/ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Paperclip, Maximize2, X, MoreHorizontal } from "lucide-react";
 import { TaskStatusIcon } from "@/components/icons/task-status-icons";
@@ -112,7 +108,9 @@ export function NewTaskProvider({
               <div className="flex items-center gap-0.5 text-muted-foreground">
                 <button
                   aria-label="Maximize"
-                  className="grid h-6 w-6 place-items-center rounded hover:bg-accent hover:text-foreground"
+                  disabled
+                  title="Coming soon"
+                  className="grid h-6 w-6 cursor-not-allowed place-items-center rounded opacity-60"
                 >
                   <Maximize2 className="h-3.5 w-3.5" />
                 </button>
@@ -199,7 +197,9 @@ export function NewTaskProvider({
             <div className="flex items-center justify-between border-t px-3 py-2">
               <button
                 aria-label="Attach"
-                className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                disabled
+                title="Coming soon"
+                className="grid h-7 w-7 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60"
               >
                 <Paperclip className="h-3.5 w-3.5" />
               </button>

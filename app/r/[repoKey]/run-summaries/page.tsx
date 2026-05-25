@@ -11,7 +11,7 @@ export default async function RunSummariesIndex({
       repoKey={repoKey.toUpperCase()}
       category="run-summary"
       basePath="run-summaries"
-      description="Human-readable summaries of Coding Assistant runs — what changed, what was validated, where the assistant made conservative choices. Raw run logs are not committed."
+      description="Human-readable summaries of Clarise runs: what changed, what was validated, and where Clarise made conservative choices."
     />
   );
 }

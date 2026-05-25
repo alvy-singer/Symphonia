@@ -12,7 +12,7 @@ export default async function DecisionsIndex({
       category="decision"
       basePath="decisions"
       description="Architecture and product decisions, captured close to the code. Each decision has a status (Proposed, Accepted, Superseded), the why, and the consequences."
-      emptyHint="A good first decision: Markdown is the source of truth — Tasks, Docs, Decisions and Reviews live in the repo, GitHub/Linear are projections."
+      emptyHint="A good first decision: repository documents are the source of truth."
     />
   );
 }

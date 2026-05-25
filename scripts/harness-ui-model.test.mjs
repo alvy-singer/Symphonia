@@ -48,10 +48,10 @@ function task(attrs = {}) {
 test("automation and daemon labels reflect enabled and disabled states", () => {
   assert.equal(automationLabel({ enabled: true }), "Automation on");
   assert.equal(automationLabel({ enabled: false }), "Automation off");
-  assert.equal(harnessLabel({ enabled: true }), "Harness on");
-  assert.equal(harnessLabel({ enabled: false }), "Harness off");
-  assert.equal(daemonLabel({ running: true }), "Daemon running");
-  assert.equal(daemonLabel({ running: false }), "Daemon idle");
+  assert.equal(harnessLabel({ enabled: true }), "Automation on");
+  assert.equal(harnessLabel({ enabled: false }), "Automation off");
+  assert.equal(daemonLabel({ running: true }), "Background service: Active");
+  assert.equal(daemonLabel({ running: false }), "Background service: Stopped");
 });
 
 test("task badges expose eligibility reasons and active run states", () => {

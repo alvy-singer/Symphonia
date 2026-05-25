@@ -25,11 +25,11 @@ export function automationLabel(automation?: RepositoryAutomationState | null): 
 }
 
 export function harnessLabel(automation?: RepositoryAutomationState | null): string {
-  return automation?.enabled ? "Harness on" : "Harness off";
+  return automation?.enabled ? "Automation on" : "Automation off";
 }
 
 export function daemonLabel(daemon?: { running?: boolean } | null): string {
-  return daemon?.running ? "Daemon running" : "Daemon idle";
+  return daemon?.running ? "Background service: Active" : "Background service: Stopped";
 }
 
 export function isActiveRun(run?: CodingAssistantRun | null): boolean {

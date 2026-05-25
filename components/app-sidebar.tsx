@@ -161,7 +161,9 @@ function SidebarFooter({ theme, toggle }: { theme: "light" | "dark"; toggle: () 
     <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
       <button
         type="button"
-        className="flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-sidebar-accent"
+        disabled
+        title="Coming soon"
+        className="flex items-center gap-2 rounded-md px-1.5 py-1 opacity-60"
       >
         <span className="grid h-6 w-6 place-items-center rounded-full bg-rose-500 text-[10px] font-medium text-white">
           AM

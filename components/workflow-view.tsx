@@ -26,7 +26,7 @@ function validate(text: string): ValidationError[] {
       if (!["codex", "claude", "cursor"].includes(v)) {
         errors.push({
           line: i + 1,
-          message: `Unknown AI assistant "${v}". Use codex, claude, or cursor.`,
+          message: `Unknown AI assistant "${v}". Use a supported assistant configured by your team.`,
         });
       }
     }
@@ -63,7 +63,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
     })
       .then(async (res) => {
         const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
-        if (!res.ok || !payload.workflow) throw new Error(payload.error ?? "Could not load WORKFLOW.md");
+        if (!res.ok || !payload.workflow) throw new Error(payload.error ?? "Could not load automation rules");
         return payload.workflow;
       })
       .then((next) => {
@@ -73,7 +73,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
         setDirty(false);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load WORKFLOW.md");
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load automation rules");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -99,13 +99,13 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
       );
       const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
       if (!res.ok || !payload.workflow) {
-        throw new Error(payload.error ?? "Could not create WORKFLOW.md");
+        throw new Error(payload.error ?? "Could not create automation rules");
       }
       setWorkflow(payload.workflow);
       setBody(payload.workflow.body);
       setDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create WORKFLOW.md");
+      setError(err instanceof Error ? err.message : "Could not create automation rules");
     } finally {
       setPending(null);
     }
@@ -121,12 +121,12 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
         body: JSON.stringify({ body }),
       });
       const payload = (await res.json()) as { workflow?: WorkflowFile; error?: string };
-      if (!res.ok || !payload.workflow) throw new Error(payload.error ?? "Could not save WORKFLOW.md");
+      if (!res.ok || !payload.workflow) throw new Error(payload.error ?? "Could not save automation rules");
       setWorkflow(payload.workflow);
       setBody(payload.workflow.body);
       setDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save WORKFLOW.md");
+      setError(err instanceof Error ? err.message : "Could not save automation rules");
     } finally {
       setPending(null);
     }

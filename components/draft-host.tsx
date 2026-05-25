@@ -36,13 +36,12 @@ const CATEGORY_PLACEHOLDERS: Record<DocCategory, string> = {
     "Goal\n\nContext\n\nAcceptance criteria\n- [ ] \n\nNotes\n\nLinked sources\n\nReview notes\n\nRun summaries",
   project:
     "Goal\n\nMilestones\n\nMembers\n\nLinks\n\nRisks",
-  doc: "Outline what you want to document. Markdown is preserved.",
+  doc: "Outline what you want to document. Formatting is preserved.",
   decision:
     "Status: Proposed\n\nContext\n\nDecision\n\nWhy\n\nConsequences",
   review:
     "What was reviewed\n\nWent well\n\nNeeds work\n\nFollow-ups",
-  "run-summary":
-    "Coding Assistant: \n\nFiles changed\n\nSummary\n\nValidation",
+  "run-summary": "Clarise: \n\nFiles changed\n\nSummary\n\nValidation",
   workflow: "",
 };
 
@@ -53,7 +52,7 @@ const CATEGORY_TITLE_HINT: Record<DocCategory, string> = {
   decision: "New Decision",
   review: "New Review",
   "run-summary": "New Run Summary",
-  workflow: "WORKFLOW.md",
+  workflow: "Automation Rules",
 };
 
 /**

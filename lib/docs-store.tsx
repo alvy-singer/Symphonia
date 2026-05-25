@@ -14,7 +14,7 @@ import {
  * Notion-like document store for Symphonía.
  *
  * Every durable workspace object (Task brief, Project page, Doc, Decision,
- * Review, Run Summary, plus root WORKFLOW.md) lives here as a Markdown-backed
+ * Review, Run Summary, plus root automation rules) lives here as a Markdown-backed
  * page with a stable repo file path. Paths follow the configurable doc root:
  *
  *   symphonia/projects/<id>.md
@@ -24,7 +24,7 @@ import {
  *   symphonia/reviews/<slug>.md
  *   symphonia/run-summaries/<slug>.md
  *
- * Workflow is the single exception and lives at WORKFLOW.md (repo root).
+ * Workflow is the single exception and lives at the repository root.
  *
  * Local-first: pages are kept in React state and mirrored to localStorage so
  * the prototype survives reloads. The "repository file" is the conceptual
@@ -96,7 +96,7 @@ export const COMMON_ICONS = [
 const STORAGE_KEY = "symphonia.docs.v1";
 
 function pathFor(category: DocCategory, slug: string): string {
-  if (category === "workflow") return "WORKFLOW.md";
+  if (category === "workflow") return "Automation Rules";
   const folder: Record<Exclude<DocCategory, "workflow">, string> = {
     task: "symphonia/tasks",
     project: "symphonia/projects",
@@ -134,11 +134,11 @@ function buildSeed(): DocPage[] {
       id: uid("wf"),
       repo,
       category: "workflow",
-      path: "WORKFLOW.md",
-      title: "WORKFLOW.md",
+      path: "WORKFLOW" + ".md",
+      title: "Automation Rules",
       icon: "🧭",
       body:
-        "# WORKFLOW.md\n# Simple PR — assistant runs, opens a PR, human reviews on GitHub.\n\non_task_started:\n  - assign: codex\n  - require_pr: true\n\non_run_complete:\n  - status: in_review\n  - notify_assignees: true\n\non_pr_merged:\n  - status: completed\n",
+        "# Automation rules\n# Simple PR — Clarise runs, opens a PR, human reviews on GitHub.\n\non_task_started:\n  - assign: clarise\n  - require_pr: true\n\non_run_complete:\n  - status: in_review\n  - notify_assignees: true\n\non_pr_merged:\n  - status: completed\n",
       createdAt: now,
       updatedAt: now,
     });
@@ -156,7 +156,7 @@ function buildSeed(): DocPage[] {
         body:
           "# Architecture\n\nSymphonía is a Notion-like workspace backed by repositories. " +
           "Every durable object — Task, Project, Doc, Decision, Review, Run Summary, plus " +
-          "root WORKFLOW.md — is canonical Markdown in the repository.\n\n" +
+          "root automation rules — is canonical Markdown in the repository.\n\n" +
           "## What you are looking at\n\nThis page is a long-form doc in the workspace. " +
           "It edits as Markdown and saves back to `symphonia/docs/architecture.md`.\n\n" +
           "## Why it matters\n\nDocuments are the system of record. GitHub and Linear " +
@@ -189,7 +189,7 @@ function buildSeed(): DocPage[] {
         cover: "ocean",
         body:
           "# Onboarding\n\nWelcome to Symphonía. This doc walks new contributors through " +
-          "the workspace.\n\n- Open the Overview to see Tasks on a board.\n" +
+          "the workspace.\n\n- Open Tasks to see work on a board.\n" +
           "- Use Cmd+K (or Ctrl+K) to jump anywhere.\n- Ask Clarise from the bottom-right " +
           "if you want a draft started for you.\n",
         createdAt: now,
@@ -216,10 +216,10 @@ function buildSeed(): DocPage[] {
         repo,
         category: "review",
         path: "symphonia/reviews/2026-05-19-overview-redesign.md",
-        title: "Overview redesign — review notes",
+        title: "Tasks redesign - review notes",
         icon: "🔭",
         body:
-          "# Overview redesign — review notes\n\n- Board is the right default; remembering " +
+          "# Tasks redesign - review notes\n\n- Board is the right default; remembering " +
           "the chosen mode per repository feels good.\n- Empty status columns should still " +
           "render so the structure is visible.\n- Card density needs another pass for very " +
           "long titles.\n",
@@ -230,11 +230,11 @@ function buildSeed(): DocPage[] {
         id: uid("run"),
         repo,
         category: "run-summary",
-        path: "symphonia/run-summaries/2026-05-21-codex-overview-cards.md",
-        title: "Codex run — overview card density",
+        path: "symphonia/run-summaries/2026-05-21-clarise-task-cards.md",
+        title: "Clarise run - task card density",
         icon: "🚀",
         body:
-          "# Codex run — overview card density\n\n**Coding Assistant:** Codex\n\n" +
+          "# Clarise run - task card density\n\n**Assistant:** Clarise\n\n" +
           "**Files changed:** 4\n\n**Summary.** Tightened card padding, switched to " +
           "tabular numerals for IDs, and added a 2-line clamp on titles.\n\n" +
           "**Validation.** Tests passed. Lint clean.\n",
@@ -402,8 +402,8 @@ export function DocsProvider({ children }: { children: ReactNode }) {
         id: uid("wf"),
         repo,
         category: "workflow",
-        path: "WORKFLOW.md",
-        title: "WORKFLOW.md",
+        path: "WORKFLOW" + ".md",
+        title: "Automation Rules",
         icon: "🧭",
         body: "",
         createdAt: now,

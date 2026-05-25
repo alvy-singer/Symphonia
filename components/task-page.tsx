@@ -140,7 +140,7 @@ async function startCodingAssistantRun(
     },
   );
   const data = (await res.json()) as { task?: ServiceTask; error?: string };
-  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not start Coding Assistant");
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not start Clarise");
   return data.task;
 }
 
@@ -156,7 +156,7 @@ async function fetchCodingAssistantRun(
     { cache: "no-store" },
   );
   const data = (await res.json()) as { run?: CodingAssistantRun; error?: string };
-  if (!res.ok || !data.run) throw new Error(data.error ?? "Could not load Coding Assistant run");
+  if (!res.ok || !data.run) throw new Error(data.error ?? "Could not load Clarise run");
   return data.run;
 }
 
@@ -191,7 +191,7 @@ async function cancelCodingAssistantRun(
     { method: "POST" },
   );
   const data = (await res.json()) as { task?: ServiceTask; error?: string };
-  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not cancel Coding Assistant run");
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not cancel Clarise run");
   return data.task;
 }
 
@@ -476,7 +476,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   if (!task && !error) {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
-        Loading Markdown task…
+        Loading task…
       </div>
     );
   }
@@ -500,9 +500,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         </Link>
         <span className="text-muted-foreground">/</span>
         <span className="font-mono text-muted-foreground">{task.key}</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">
-          Markdown source <span className="font-mono">{task.path}</span>
-        </span>
+        <span className="ml-auto text-[11px] text-muted-foreground">Saved in repository</span>
       </header>
 
       {error && (
@@ -544,7 +542,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
               : "bg-amber-500/10 text-amber-800 dark:text-amber-200",
           )}
         >
-          Harness {eligibility.eligible ? "eligible" : "not eligible"}: {eligibility.reason}
+          Automation {eligibility.eligible ? "eligible" : "not eligible"}: {eligibility.reason}
         </div>
       )}
 
@@ -633,7 +631,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
                 disabled={!dirty || pending != null || !title.trim()}
                 className="ml-auto rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {pending === "save" ? "Saving…" : dirty ? "Save Markdown" : "Saved"}
+                {pending === "save" ? "Saving…" : dirty ? "Save changes" : "Saved"}
               </button>
             </div>
 
@@ -694,7 +692,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
                 setDirty(true);
               }}
               spellCheck={false}
-              aria-label="Task Markdown body"
+              aria-label="Task details"
               className="mt-4 min-h-[55svh] w-full resize-none bg-transparent font-mono text-[13px] leading-6 outline-none"
             />
           </div>
@@ -748,7 +746,7 @@ function TaskMeta({
           <span>{task.assistant || "Not assigned"}</span>
         </div>
       </Section>
-      <Section title="Harness">
+      <Section title="Automation">
         {eligibility ? (
           <div className="space-y-2">
             <span
@@ -771,7 +769,7 @@ function TaskMeta({
         <Section title="Run">
           <div className="space-y-1 text-muted-foreground">
             <p className="font-mono text-[11px]">{task.run.id}</p>
-            {task.run.provider && <p>{task.run.provider}</p>}
+            {task.run.provider && <p>Clarise automation</p>}
             <p>{task.run.label ?? task.run.state}</p>
             {task.run.currentStep && <p>{task.run.currentStep}</p>}
             {task.run.message && <p>{task.run.message}</p>}
@@ -874,8 +872,8 @@ function TaskMeta({
           <span className="text-muted-foreground">No PR</span>
         )}
       </Section>
-      <Section title="File">
-        <p className="break-all font-mono text-[11px] text-muted-foreground">{task.path}</p>
+      <Section title="Repository record">
+        <p className="text-[11px] text-muted-foreground">Stored with this repository.</p>
       </Section>
     </div>
   );

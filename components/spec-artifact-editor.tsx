@@ -46,7 +46,7 @@ async function fetchArtifact(
   );
   const payload = (await res.json()) as { artifact?: SpecArtifact; error?: string };
   if (!res.ok || !payload.artifact) {
-    throw new Error(payload.error ?? "Could not load workspace file");
+    throw new Error(payload.error ?? "Could not load document");
   }
   return payload.artifact;
 }
@@ -74,7 +74,7 @@ async function saveArtifact(
   );
   const data = (await res.json()) as { artifact?: SpecArtifact; error?: string };
   if (!res.ok || !data.artifact) {
-    throw new Error(data.error ?? "Could not save workspace file");
+    throw new Error(data.error ?? "Could not save document");
   }
   return data.artifact;
 }
@@ -114,7 +114,7 @@ export function SpecArtifactEditor({
         setNotice(null);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load workspace file");
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load document");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -139,10 +139,10 @@ export function SpecArtifactEditor({
       setStatus(updated.status);
       setBody(updated.body);
       setDirty(false);
-      setNotice("Markdown saved.");
+      setNotice("Document saved.");
       window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save workspace file");
+      setError(err instanceof Error ? err.message : "Could not save document");
     } finally {
       setPending(false);
     }
@@ -151,7 +151,7 @@ export function SpecArtifactEditor({
   if (loading) {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
-        Loading workspace file...
+        Loading document...
       </div>
     );
   }
@@ -159,7 +159,7 @@ export function SpecArtifactEditor({
   if (!artifact) {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
-        {error ?? "Workspace file not found"}
+        {error ?? "Document not found"}
       </div>
     );
   }
@@ -171,15 +171,13 @@ export function SpecArtifactEditor({
           href={`/r/${repoSlug}/tasks`}
           className="text-muted-foreground hover:text-foreground"
         >
-          Workspace
+          Planning
         </Link>
         <span className="text-muted-foreground">/</span>
         <span className="text-muted-foreground">{TYPE_LABELS[artifact.type]}</span>
         <span className="text-muted-foreground">/</span>
         <span className="font-mono text-muted-foreground">{artifact.id}</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">
-          Markdown source <span className="font-mono">{artifact.path}</span>
-        </span>
+        <span className="ml-auto text-[11px] text-muted-foreground">Saved in repository</span>
       </header>
 
       {error && <Notice tone="warn">{error}</Notice>}
@@ -201,7 +199,7 @@ export function SpecArtifactEditor({
               setTitle(event.target.value);
               setDirty(true);
             }}
-            aria-label="Workspace file title"
+            aria-label="Document title"
             className="mt-4 w-full bg-transparent text-3xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/40"
           />
 
@@ -232,7 +230,7 @@ export function SpecArtifactEditor({
               )}
             >
               <Save className="h-3.5 w-3.5" />
-              {pending ? "Saving..." : dirty ? "Save Markdown" : "Saved"}
+              {pending ? "Saving..." : dirty ? "Save changes" : "Saved"}
             </button>
           </div>
 
@@ -243,7 +241,7 @@ export function SpecArtifactEditor({
               setDirty(true);
             }}
             spellCheck={false}
-            aria-label="Workspace Markdown body"
+            aria-label="Document body"
             className="mt-4 min-h-[58svh] w-full resize-y rounded-md border bg-background p-3 font-mono text-[13px] leading-6 outline-none focus:ring-2 focus:ring-ring"
           />
         </div>

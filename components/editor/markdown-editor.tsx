@@ -29,13 +29,13 @@ interface Props {
   isDraft?: boolean;
   onSave?: () => void;
   onDiscard?: () => void;
-  /** Hide title editing (used for the WORKFLOW.md editor). */
+  /** Hide title editing where the title is fixed. */
   fixedTitle?: boolean;
   /** Optional content rendered above the editor (e.g. cover/header). */
   className?: string;
   /** Slot rendered in the toolbar — used by the workflow editor for templates. */
   rightToolbarSlot?: React.ReactNode;
-  /** Slot rendered below the body (e.g. validation panel for WORKFLOW.md). */
+  /** Slot rendered below the body, such as a validation panel. */
   belowBodySlot?: React.ReactNode;
   /** Override placeholder for body. */
   bodyPlaceholder?: string;
@@ -298,7 +298,7 @@ export function MarkdownEditor({
                 className="w-full bg-transparent text-3xl font-semibold tracking-tight placeholder:text-muted-foreground/40 outline-none"
               />
             )}
-            <p className="mt-1 text-[11px] text-muted-foreground font-mono">{page.path}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Saved in repository</p>
           </div>
 
           {/* Markdown formatting toolbar */}
@@ -338,9 +338,9 @@ export function MarkdownEditor({
               setDirty(true);
             }}
             spellCheck={false}
-            aria-label="Page content (Markdown)"
+            aria-label="Page content"
             placeholder={
-              bodyPlaceholder ?? "Press 'Cmd/Ctrl+S' to save anytime — Markdown is preserved."
+              bodyPlaceholder ?? "Press 'Cmd/Ctrl+S' to save anytime — formatting is preserved."
             }
             className="mt-3 min-h-[40svh] w-full resize-none bg-transparent font-mono text-[13px] leading-6 placeholder:text-muted-foreground/50 outline-none"
           />

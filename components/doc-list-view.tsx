@@ -69,8 +69,7 @@ export function DocListView({
             <div className="rounded-lg border border-dashed p-8 text-center">
               <p className="text-sm font-medium">No {heading.toLowerCase()} yet</p>
               <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-                {emptyHint ??
-                  `Pages live as Markdown under symphonia/${basePath}/. Open one as an editable draft to get started.`}
+                {emptyHint ?? "Create a page to keep this repository's notes, decisions, and reviews in one place."}
               </p>
               <button
                 onClick={() => startDraft(repoKey, category)}
@@ -126,9 +125,7 @@ function PageRow({
                 {preview}
               </p>
             )}
-            <p className="mt-1 text-[11px] text-muted-foreground font-mono">
-              {page.path}
-            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Saved in repository</p>
           </div>
         </div>
       </Link>

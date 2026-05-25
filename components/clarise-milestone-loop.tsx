@@ -329,7 +329,7 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
   if (loading) {
     return (
       <div className="grid min-h-full place-items-center px-6 py-12 text-sm text-muted-foreground">
-        Loading workspace...
+        Loading planning...
       </div>
     );
   }
@@ -339,7 +339,7 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
       <header className="border-b">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase text-muted-foreground">Workspace</p>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Planning</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-normal">Planning handoff</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Turn a milestone idea into reviewed, repo-backed tasks before any agent starts work.
@@ -410,7 +410,7 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
                   <div className="rounded-md border bg-muted/20 p-3">
                     <p className="text-sm font-medium">Clarise will shape this into durable files.</p>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      The source of truth stays in Markdown under this repository, so the team can
+                      The source of truth stays in this repository, so the team can
                       inspect the milestone, requirements, plan, and task proposal before work begins.
                     </p>
                     <dl className="mt-4 space-y-2 text-xs">
@@ -465,7 +465,7 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
                       <h2 className="text-base font-semibold">Plan approved</h2>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
                         Clarise can now turn this plan into implementation tasks. Creating tasks
-                        only writes To-do Markdown files; assigning work remains a separate action.
+                        only creates To-do tasks; assigning work remains a separate action.
                       </p>
                     </div>
                   </div>
@@ -583,7 +583,7 @@ function MilestoneHeader({ milestone, repoSlug }: { milestone: SpecArtifact; rep
         className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted"
       >
         <PenLine className="h-4 w-4" />
-        Edit Markdown
+        Edit proposal
       </Link>
     </section>
   );
@@ -608,7 +608,7 @@ function DiscussionForm({
         <div>
           <h2 className="text-base font-semibold">Discuss milestone</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Answer what matters now. Clarise saves the discussion as Markdown.
+            Answer what matters now. Clarise saves the discussion in this repository.
           </p>
         </div>
         <button
@@ -898,7 +898,7 @@ function TaskProposalPanel({
           <div>
             <p className="text-sm font-medium">Saved proposal found</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Open the Markdown proposal, or regenerate the review list here.
+              Open the proposal, or regenerate the review list here.
             </p>
           </div>
           <button
@@ -1067,7 +1067,7 @@ async function fetchArtifact(repoKey: string, type: string, id: string): Promise
   );
   const payload = (await res.json()) as { artifact?: SpecArtifact; error?: string };
   if (!res.ok || !payload.artifact) {
-    throw new Error(payload.error ?? "Could not load workspace file");
+    throw new Error(payload.error ?? "Could not load planning document");
   }
   return payload.artifact;
 }

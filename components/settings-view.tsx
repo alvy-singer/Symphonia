@@ -241,7 +241,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 <input
                   value={workspaceName}
                   onChange={(e) => setWorkspaceName(e.target.value)}
-                  maxLength={50}
+                  required maxLength={50}
                   className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
@@ -739,14 +739,9 @@ function IntegrationRow({
                         </div>
                         <p className="mt-0.5 text-sm">{it.title}</p>
                       </div>
-                      <a
-                        href="#"
-                        onClick={(e) => e.preventDefault()}
-                        className="text-muted-foreground hover:text-foreground"
-                        aria-label="Open externally"
-                      >
+                      <button disabled title="Coming soon" className="cursor-not-allowed text-muted-foreground opacity-60" aria-label="Open externally">
                         <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
+                      </button>
                     </li>
                   );
                 })}
@@ -757,9 +752,8 @@ function IntegrationRow({
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button
-                    disabled={selected.size === 0}
-                    title={selected.size === 0 ? "Select items to link" : undefined}
-                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled title="Coming soon"
+                    className="inline-flex cursor-not-allowed items-center gap-1 rounded-md border px-2 py-1 text-[11px] opacity-60"
                   >
                     <Link2 className="h-3 w-3" /> Link to existing
                   </button>

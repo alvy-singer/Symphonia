@@ -92,8 +92,8 @@ const SPEC_STATUS_LABELS: Record<SpecArtifactStatus, string> = {
  * Notion-like document tree, scoped to one repository.
  *
  * Each section is a category. Docs and Decisions support nested children.
- * Tasks/Projects/Reviews/Run Summaries are flat lists. Workflow is a single
- * pinned link to root WORKFLOW.md.
+ * Tasks/Projects/Reviews/Run Summaries are flat lists. Automation rules are a
+ * pinned root link.
  */
 export function DocTree({ repoKey, onNew }: Props) {
   const { forRepo } = useDocs();
@@ -114,7 +114,7 @@ export function DocTree({ repoKey, onNew }: Props) {
       error?: string;
     };
     if (!res.ok || !payload.specWorkspace) {
-      throw new Error(payload.error ?? "Could not load workspace files");
+      throw new Error(payload.error ?? "Could not load planning documents");
     }
     setSpecWorkspace(payload.specWorkspace);
     setSpecError(null);
@@ -126,7 +126,7 @@ export function DocTree({ repoKey, onNew }: Props) {
     loadSpecWorkspace().catch((err: unknown) => {
       if (!cancelled) {
         setSpecWorkspace(null);
-        setSpecError(err instanceof Error ? err.message : "Could not load workspace files");
+        setSpecError(err instanceof Error ? err.message : "Could not load planning documents");
       }
     });
 
@@ -155,11 +155,11 @@ export function DocTree({ repoKey, onNew }: Props) {
         error?: string;
       };
       if (!res.ok || !payload.specWorkspace) {
-        throw new Error(payload.error ?? "Could not create spec workspace");
+        throw new Error(payload.error ?? "Could not set up planning documents");
       }
       setSpecWorkspace(payload.specWorkspace);
     } catch (err) {
-      setSpecError(err instanceof Error ? err.message : "Could not create spec workspace");
+      setSpecError(err instanceof Error ? err.message : "Could not set up planning documents");
     } finally {
       setSpecPending(null);
     }
@@ -179,12 +179,12 @@ export function DocTree({ repoKey, onNew }: Props) {
       );
       const payload = (await res.json()) as { artifact?: SpecArtifact; error?: string };
       if (!res.ok || !payload.artifact) {
-        throw new Error(payload.error ?? "Could not create workspace file");
+        throw new Error(payload.error ?? "Could not create document");
       }
       await loadSpecWorkspace();
       router.push(specArtifactHref(slug, payload.artifact));
     } catch (err) {
-      setSpecError(err instanceof Error ? err.message : "Could not create workspace file");
+      setSpecError(err instanceof Error ? err.message : "Could not create document");
     } finally {
       setSpecPending(null);
     }
@@ -192,12 +192,12 @@ export function DocTree({ repoKey, onNew }: Props) {
 
   return (
     <div className="space-y-3 text-[13px]">
-      {/* Workflow is pinned, not a section. */}
+      {/* Automation rules are pinned, not a section. */}
       <SidebarLink
         href={`/r/${slug}/workflow`}
         active={pathname === `/r/${slug}/workflow`}
         icon={<GitBranch className="h-3.5 w-3.5" />}
-        label="WORKFLOW.md"
+        label="Automation Rules"
         right={
           <span className="text-[10px] font-mono text-muted-foreground">root</span>
         }
@@ -233,15 +233,13 @@ export function DocTree({ repoKey, onNew }: Props) {
         })
       ) : (
         <div className="rounded-md border border-dashed px-2 py-2">
-          <p className="text-[11px] text-muted-foreground">
-            Create a spec workspace for this repository.
-          </p>
+          <p className="text-[11px] text-muted-foreground">Set up planning documents for this repository.</p>
           <button
             onClick={initializeSpecWorkspace}
             disabled={specPending === "initialize"}
             className="mt-2 rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {specPending === "initialize" ? "Creating..." : "Create Spec Workspace"}
+            {specPending === "initialize" ? "Creating..." : "Set up planning docs"}
           </button>
         </div>
       )}

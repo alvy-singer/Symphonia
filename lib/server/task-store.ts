@@ -110,7 +110,7 @@ function applyLifecycle(
           review_approved: false,
           review_summary:
             stringParam(params.summary) ??
-            "The Coding Assistant produced a reviewable handoff.",
+            "Clarise produced a reviewable handoff.",
           files_changed: arrayParam(params.files_changed ?? params.filesChanged) ?? [
             `symphonia/tasks/${key}.md`,
           ],
@@ -129,7 +129,7 @@ function applyLifecycle(
           paused_reason: "run_failed",
           paused_explanation:
             stringParam(params.explanation) ??
-            "The Coding Assistant could not produce a reviewable handoff.",
+            "Clarise could not produce a reviewable handoff.",
         },
         body,
       };
@@ -165,7 +165,7 @@ function applyLifecycle(
           ...base,
           status: "in_progress",
           review_approved: false,
-          next_review_action: "Coding Assistant is continuing with requested changes.",
+          next_review_action: "Clarise is continuing with requested changes.",
         },
         body: appendReviewNotes(body, feedback, checklist),
       };
