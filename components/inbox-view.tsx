@@ -9,6 +9,7 @@ import {
   GitPullRequest,
   CheckCircle2,
   AlertCircle,
+  ArrowLeft,
   Bell,
   Inbox as InboxIcon,
   Archive,
@@ -148,7 +149,7 @@ export function InboxView({ repoKey }: { repoKey: string }) {
     [repoKey],
   );
   const [category, setCategory] = useState<Category>("all");
-  const [activeId, setActiveId] = useState<string | null>(scoped[0]?.id ?? null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [readMap, setReadMap] = useState<Record<string, boolean>>(
     Object.fromEntries(scoped.map((n) => [n.id, n.read])),
   );
@@ -157,7 +158,7 @@ export function InboxView({ repoKey }: { repoKey: string }) {
     category === "all" ? true : n.category.includes(category as Exclude<Category, "all">),
   );
   const unread = scoped.filter((n) => !readMap[n.id]).length;
-  const active = scoped.find((n) => n.id === activeId) ?? filtered[0];
+  const active = activeId ? scoped.find((n) => n.id === activeId) ?? null : null;
 
   const markAllRead = () =>
     setReadMap((m) => Object.fromEntries(Object.keys(m).map((k) => [k, true])));
@@ -200,7 +201,13 @@ export function InboxView({ repoKey }: { repoKey: string }) {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        <ul className="w-full md:w-[360px] shrink-0 overflow-y-auto border-r divide-y">
+        <ul
+          className={cn(
+            "shrink-0 divide-y overflow-y-auto border-r md:w-[360px]",
+            "w-full",
+            active && "hidden md:block",
+          )}
+        >
           {filtered.length === 0 && (
             <li className="p-6 text-center text-xs text-muted-foreground">
               You&apos;re all caught up.
@@ -264,11 +271,24 @@ export function InboxView({ repoKey }: { repoKey: string }) {
           })}
         </ul>
 
-        <section className="hidden md:flex flex-1 flex-col">
+        <section
+          className={cn(
+            "flex-1 flex-col",
+            active ? "flex" : "hidden md:flex",
+          )}
+        >
           {active ? (
             <>
               <div className="flex items-center justify-between border-b px-4 py-2.5">
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveId(null)}
+                    aria-label="Back to inbox"
+                    className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                  </button>
                   <span
                     className={cn(
                       "grid h-7 w-7 place-items-center rounded-full text-[10px] font-medium text-white shrink-0",

@@ -26,7 +26,7 @@ function validate(text: string): ValidationError[] {
       if (!["codex", "claude", "cursor"].includes(v)) {
         errors.push({
           line: i + 1,
-          message: `Unknown coding assistant "${v}". Use codex, claude, or cursor.`,
+          message: `Unknown AI assistant "${v}". Use codex, claude, or cursor.`,
         });
       }
     }
@@ -135,7 +135,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
   if (loading) {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
-        Loading WORKFLOW.md...
+        Loading automation rules...
       </div>
     );
   }
@@ -152,9 +152,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
     return (
       <div className="flex h-full flex-col">
         <header className="border-b px-4 py-2.5 text-sm">
-          <span className="font-semibold">Workflow</span>{" "}
-          <span className="text-muted-foreground">/</span>{" "}
-          <span className="font-mono text-[11px] text-muted-foreground">WORKFLOW.md</span>
+          <span className="font-semibold">Automation Rules</span>
         </header>
         {error && (
           <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -163,9 +161,9 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
         )}
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-2xl px-4 py-8">
-            <h2 className="text-lg font-semibold">WORKFLOW.md is missing</h2>
+            <h2 className="text-lg font-semibold">Automation rules haven&apos;t been set up yet</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Choose a template to create the root workflow file for this repository.
+              Choose a template to define how Clarise picks up and runs tasks in this repository.
             </p>
             <div className="mt-5 grid gap-2 sm:grid-cols-3">
               {workflow.templates.map((template) => (
@@ -193,9 +191,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <div className="text-sm">
-          <span className="font-semibold">Workflow</span>{" "}
-          <span className="text-muted-foreground">/</span>{" "}
-          <span className="font-mono text-[11px] text-muted-foreground">WORKFLOW.md</span>
+          <span className="font-semibold">Automation Rules</span>
         </div>
         <div className="flex items-center gap-2">
           <span
@@ -222,7 +218,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
             disabled={!dirty || pending != null}
             className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {pending === "save" ? "Saving..." : dirty ? "Save WORKFLOW.md" : "Saved"}
+            {pending === "save" ? "Saving..." : dirty ? "Save changes" : "Saved"}
           </button>
         </div>
       </header>
@@ -242,7 +238,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
               setDirty(true);
             }}
             spellCheck={false}
-            aria-label="WORKFLOW.md body"
+            aria-label="Automation rules"
             className="min-h-[60svh] w-full resize-y rounded-md border bg-background p-3 font-mono text-[13px] leading-6 outline-none focus:ring-2 focus:ring-ring"
           />
 
@@ -252,8 +248,7 @@ export function WorkflowView({ repoKey }: { repoKey: string }) {
             </h3>
             {errors.length === 0 ? (
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Workflow looks good. Coding Assistants will follow these hooks on the
-                next task in {repoKey}.
+                Looks good. Clarise will follow these rules on the next task in {repoKey}.
               </p>
             ) : (
               <ul className="mt-2 space-y-1.5">

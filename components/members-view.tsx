@@ -59,7 +59,11 @@ export function MembersView({ repoKey }: { repoKey: string }) {
             <option value="Member">Member</option>
             <option value="Guest">Guest</option>
           </select>
-          <button className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-2 py-1 text-[12px] hover:opacity-90">
+          <button
+            disabled
+            title="Coming soon"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[12px] text-primary-foreground opacity-60"
+          >
             <Plus className="h-3.5 w-3.5" /> Invite
           </button>
         </div>

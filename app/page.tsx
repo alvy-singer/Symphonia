@@ -11,6 +11,7 @@ import {
   FolderGit2,
   Github,
   Search,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import type {
@@ -19,6 +20,7 @@ import type {
   RepositorySummary,
 } from "@/lib/repository-model";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function RepositoriesPage() {
   const router = useRouter();
@@ -31,6 +33,7 @@ export default function RepositoriesPage() {
   const [githubConnection, setGitHubConnection] = useState<GitHubConnectionState | null>(null);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [openingGitHubRepo, setOpeningGitHubRepo] = useState<string | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<RepositorySummary | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -133,6 +136,7 @@ export default function RepositoriesPage() {
   const connectedCount = repositories.length + githubOnlyRepositories.length;
   const hasVisibleRepositories =
     filteredGitHubRepositories.length > 0 || filteredLocalRepositories.length > 0;
+  const showHero = !loading && connectedCount === 0;
 
   const openGitHubConnection = () => {
     if (!connectHref) {
@@ -143,12 +147,9 @@ export default function RepositoriesPage() {
     window.location.assign(connectHref);
   };
 
-  const removeRepository = async (repository: RepositorySummary) => {
-    const confirmed = window.confirm(
-      `Remove ${repository.name} from Symphonía? Local files and GitHub access will not be changed.`,
-    );
-    if (!confirmed) return;
-
+  const confirmRemoval = async () => {
+    if (!pendingRemoval) return;
+    const repository = pendingRemoval;
     setRemovingKey(repository.key);
     setError(null);
 
@@ -160,6 +161,7 @@ export default function RepositoriesPage() {
       if (!res.ok) throw new Error(payload.error ?? "Could not remove repository");
 
       setRepositories((current) => current.filter((repo) => repo.key !== repository.key));
+      setPendingRemoval(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not remove repository");
     } finally {
@@ -203,45 +205,51 @@ export default function RepositoriesPage() {
   return (
     <div className="min-h-svh bg-background text-foreground">
       <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b bg-background/95 px-4 py-2.5 backdrop-blur">
-        <div className="flex items-center gap-2 text-sm">
+        <Link href="/" className="flex items-center gap-2 text-sm" aria-label="Symphonía home">
           <span className="grid h-6 w-6 place-items-center rounded-md bg-foreground text-[11px] font-bold text-background">
             S
           </span>
           <span className="font-semibold">Symphonía</span>
-          <span className="text-muted-foreground">/</span>
-          <span className="text-muted-foreground">Repositories</span>
-        </div>
+          <span className="hidden text-muted-foreground sm:inline">/</span>
+          <span className="hidden text-muted-foreground sm:inline">Repositories</span>
+        </Link>
         <div className="flex items-center gap-1">
-          <div className="relative hidden sm:block">
+          <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search repositories"
-              className="w-56 rounded-md border bg-background py-1 pl-7 pr-2 text-[12px] focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="Search"
+              aria-label="Search repositories"
+              className="w-32 rounded-md border bg-background py-1 pl-7 pr-2 text-[12px] focus:outline-none focus:ring-2 focus:ring-ring sm:w-56"
             />
           </div>
           <button
             onClick={openGitHubConnection}
             disabled={!connectHref}
-            title={!connectHref ? "GitHub connection is unavailable" : undefined}
+            title={!connectHref ? "GitHub connection is unavailable" : "Connect to GitHub"}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground hover:opacity-90",
               !connectHref && "cursor-not-allowed opacity-50 hover:opacity-50",
             )}
           >
             <Github className="h-3.5 w-3.5" />
-            Connect to GitHub
+            <span className="hidden sm:inline">Connect to GitHub</span>
+            <span className="sm:hidden">Connect</span>
           </button>
         </div>
       </header>
 
       <main className="mx-auto max-w-5xl p-4 sm:p-6">
+        {showHero && (
+          <Hero connectHref={connectHref} onConnect={openGitHubConnection} />
+        )}
+
         <div className="mb-5 flex items-end justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Repositories</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Choose repositories on GitHub and return here automatically.
+              Open a connected workspace to view its tasks, planning, and documents.
             </p>
           </div>
           <span className="text-xs tabular-nums text-muted-foreground">
@@ -273,20 +281,30 @@ export default function RepositoriesPage() {
               {connectedCount > 0 ? "No matching repositories" : "No repositories connected"}
             </h2>
             <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-              Connect GitHub, choose repositories, and return here automatically.
+              Connect GitHub to bring in your repositories, or explore a demo workspace soon.
             </p>
-            <button
-              onClick={openGitHubConnection}
-              disabled={!connectHref}
-              title={!connectHref ? "GitHub connection is unavailable" : undefined}
-              className={cn(
-                "mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90",
-                !connectHref && "cursor-not-allowed opacity-50 hover:opacity-50",
-              )}
-            >
-              <Github className="h-4 w-4" />
-              Connect to GitHub
-            </button>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={openGitHubConnection}
+                disabled={!connectHref}
+                title={!connectHref ? "GitHub connection is unavailable" : "Connect to GitHub"}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90",
+                  !connectHref && "cursor-not-allowed opacity-50 hover:opacity-50",
+                )}
+              >
+                <Github className="h-4 w-4" />
+                Connect to GitHub
+              </button>
+              <button
+                disabled
+                title="Coming soon — demo workspaces are on the way."
+                className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground opacity-60"
+              >
+                <Sparkles className="h-4 w-4" />
+                Try a demo workspace
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-6">
@@ -327,7 +345,7 @@ export default function RepositoriesPage() {
                       <RepositoryCard
                         repository={repo}
                         removing={removingKey === repo.key}
-                        onRemove={removeRepository}
+                        onRemove={(repository) => setPendingRemoval(repository)}
                       />
                     </li>
                   ))}
@@ -337,7 +355,95 @@ export default function RepositoriesPage() {
           </div>
         )}
       </main>
+
+      <ConfirmDialog
+        open={pendingRemoval != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemoval(null);
+        }}
+        title={pendingRemoval ? `Remove ${pendingRemoval.name}?` : "Remove repository"}
+        description={
+          <>
+            This removes <span className="font-medium text-foreground">{pendingRemoval?.name}</span>{" "}
+            from Symphonía. Your GitHub repository and local files won&apos;t be affected.
+          </>
+        }
+        confirmLabel={removingKey ? "Removing…" : "Remove"}
+        cancelLabel="Cancel"
+        destructive
+        pending={removingKey != null}
+        onConfirm={confirmRemoval}
+      />
     </div>
+  );
+}
+
+function Hero({
+  connectHref,
+  onConnect,
+}: {
+  connectHref?: string;
+  onConnect: () => void;
+}) {
+  return (
+    <section className="mb-8 rounded-2xl border bg-card p-6 sm:p-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-2xl">
+          <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <Sparkles className="h-3 w-3" />
+            Welcome to Symphonía
+          </span>
+          <h2 className="mt-3 text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
+            Plan, build, and ship — with AI that writes the code.
+          </h2>
+          <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
+            Symphonía turns each repository into a calm workspace for tasks, planning, and
+            documents. Hand the work off to Clarise — your AI coding assistant — when you&apos;re
+            ready to ship.
+          </p>
+          <ul className="mt-4 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+            <HeroBullet text="Track tasks on a board or list, scoped to each repository." />
+            <HeroBullet text="Break down goals into tasks with built-in AI planning." />
+            <HeroBullet text="Assign tasks to Clarise to draft pull requests automatically." />
+            <HeroBullet text="Keep docs, decisions, and reviews next to the code." />
+          </ul>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <button
+          onClick={onConnect}
+          disabled={!connectHref}
+          title={!connectHref ? "GitHub connection is unavailable" : "Connect to GitHub"}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90",
+            !connectHref && "cursor-not-allowed opacity-50 hover:opacity-50",
+          )}
+        >
+          <Github className="h-4 w-4" />
+          Connect GitHub to get started
+        </button>
+        <button
+          disabled
+          title="Coming soon — demo workspaces are on the way."
+          className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-3 py-2 text-sm text-muted-foreground opacity-60"
+        >
+          <Sparkles className="h-4 w-4" />
+          Explore a demo workspace
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function HeroBullet({ text }: { text: string }) {
+  return (
+    <li className="flex items-start gap-2">
+      <span className="mt-1 grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+        <Check className="h-2.5 w-2.5" />
+      </span>
+      <span>{text}</span>
+    </li>
   );
 }
 

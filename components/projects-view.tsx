@@ -505,7 +505,11 @@ export function ProjectsView({ repoKey }: { repoKey: string }) {
               </option>
             ))}
           </select>
-          <button className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] hover:bg-muted">
+          <button
+            disabled
+            title="Coming soon"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
+          >
             <Filter className="h-3.5 w-3.5" /> Filter
           </button>
           <Popover>
@@ -528,7 +532,11 @@ export function ProjectsView({ repoKey }: { repoKey: string }) {
               />
             </PopoverContent>
           </Popover>
-          <button className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-2 py-1 text-[12px] hover:opacity-90">
+          <button
+            disabled
+            title="Coming soon"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[12px] text-primary-foreground opacity-60"
+          >
             <Plus className="h-3.5 w-3.5" /> New project
           </button>
         </div>

@@ -10,6 +10,7 @@ import {
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Paperclip, Maximize2, X, MoreHorizontal } from "lucide-react";
 import { TaskStatusIcon } from "@/components/icons/task-status-icons";
+import { useToast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 import type { ServiceTask } from "@/lib/task-model";
 
@@ -32,6 +33,7 @@ export function NewTaskProvider({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const toast = useToast();
 
   const reset = () => {
     setTitle("");
@@ -60,6 +62,7 @@ export function NewTaskProvider({
         }),
       );
       router.refresh();
+      toast.show(`Task ${payload.task.key} created`, "success");
 
       if (createMore) reset();
       else {
@@ -125,13 +128,16 @@ export function NewTaskProvider({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Task title"
+                maxLength={140}
+                required
                 className="w-full bg-transparent text-lg font-medium placeholder:text-muted-foreground/70 outline-none"
               />
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Add a brief — Goal, Context, Acceptance criteria…"
+                placeholder="Describe the goal, context, and what done looks like…"
                 rows={4}
+                maxLength={2000}
                 className="mt-2 w-full resize-none bg-transparent text-sm placeholder:text-muted-foreground/70 outline-none"
               />
               {error && (
@@ -146,7 +152,7 @@ export function NewTaskProvider({
                 <TaskStatusIcon status="todo" />
                 To-do
               </Pill>
-              <Pill>
+              <Pill disabled title="Coming soon">
                 <span className="flex gap-[2px]">
                   <span className="h-[3px] w-[3px] rounded-full bg-current" />
                   <span className="h-[3px] w-[3px] rounded-full bg-current" />
@@ -154,14 +160,14 @@ export function NewTaskProvider({
                 </span>
                 Priority
               </Pill>
-              <Pill>
+              <Pill disabled title="Coming soon">
                 <svg viewBox="0 0 14 14" className="h-3.5 w-3.5">
                   <circle cx="7" cy="5" r="2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2 1.5" />
                   <path d="M3 12c0-2.2 1.8-4 4-4s4 1.8 4 4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2 1.5" />
                 </svg>
-                Coding Assistant
+                Clarise
               </Pill>
-              <Pill>
+              <Pill disabled title="Coming soon">
                 <svg viewBox="0 0 14 14" className="h-3.5 w-3.5">
                   <path
                     d="M7 1.5 L12 4 L12 10 L7 12.5 L2 10 L2 4 Z M7 1.5 L7 12.5 M2 4 L7 7 L12 4"
@@ -173,7 +179,7 @@ export function NewTaskProvider({
                 </svg>
                 Project
               </Pill>
-              <Pill>
+              <Pill disabled title="Coming soon">
                 <svg viewBox="0 0 14 14" className="h-3.5 w-3.5">
                   <path
                     d="M7.5 1.5 H12 V6 L6.5 11.5 L2 7 Z M9.5 4.5 a0.6 0.6 0 1 0 0.001 0"
@@ -185,7 +191,7 @@ export function NewTaskProvider({
                 </svg>
                 Labels
               </Pill>
-              <Pill aria-label="More">
+              <Pill aria-label="More" disabled title="Coming soon">
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </Pill>
             </div>
@@ -233,11 +239,15 @@ export function NewTaskProvider({
   );
 }
 
-function Pill({ children, ...props }: React.ComponentProps<"button">) {
+function Pill({ children, className, ...props }: React.ComponentProps<"button">) {
   return (
     <button
       {...props}
-      className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+        "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-background disabled:hover:text-muted-foreground",
+        className,
+      )}
     >
       {children}
     </button>

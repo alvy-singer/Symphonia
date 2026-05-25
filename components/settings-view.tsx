@@ -8,7 +8,7 @@ import {
   type ExternalIssue,
   type ImportSource,
 } from "@/data/mock";
-import { automationLabel, daemonLabel } from "@/lib/harness-ui-model";
+import { automationLabel } from "@/lib/harness-ui-model";
 import type { GitHubConnectionState, RepositoryAutomationState } from "@/lib/repository-model";
 import {
   User as UserIcon,
@@ -93,21 +93,27 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
           })}
         </nav>
 
-        <div className="md:hidden flex gap-1 overflow-x-auto border-b px-3 py-2">
-          {sections.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActive(s.id)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs whitespace-nowrap",
-                active === s.id
-                  ? "bg-accent text-foreground font-medium"
-                  : "text-muted-foreground hover:bg-accent/60",
-              )}
-            >
-              {s.label}
-            </button>
-          ))}
+        <div className="relative md:hidden">
+          <div className="flex gap-1 overflow-x-auto border-b px-3 py-2">
+            {sections.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setActive(s.id)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs whitespace-nowrap",
+                  active === s.id
+                    ? "bg-accent text-foreground font-medium"
+                    : "text-muted-foreground hover:bg-accent/60",
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <div
+            className="pointer-events-none absolute right-0 top-0 h-full w-6 bg-gradient-to-l from-background to-transparent"
+            aria-hidden="true"
+          />
         </div>
 
         <main className="flex-1 overflow-y-auto p-6 max-w-3xl">
@@ -118,7 +124,11 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   AM
                 </span>
                 <div className="space-y-1">
-                  <button className="rounded-md border px-3 py-1 text-xs hover:bg-accent">
+                  <button
+                    disabled
+                    title="Coming soon"
+                    className="cursor-not-allowed rounded-md border px-3 py-1 text-xs opacity-60"
+                  >
                     Upload photo
                   </button>
                   <p className="text-xs text-muted-foreground">PNG or JPG, up to 2 MB.</p>
@@ -128,6 +138,8 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  required
+                  maxLength={100}
                   className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
@@ -136,6 +148,8 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   type="email"
+                  required
+                  maxLength={200}
                   className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
@@ -144,6 +158,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   value={bio}
                   onChange={(e) => setBio(e.target.value)}
                   rows={3}
+                  maxLength={300}
                   className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
               </Field>
@@ -176,12 +191,17 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                     </button>
                   ))}
                 </div>
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Tip: you can also toggle the theme from the sidebar.
+                </p>
               </Field>
               <ToggleRow
                 label="Compact density"
                 description="Tighter row heights across lists."
                 checked={false}
                 onChange={() => {}}
+                disabled
+                disabledReason="Coming soon"
               />
             </Section>
           )}
@@ -221,6 +241,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 <input
                   value={workspaceName}
                   onChange={(e) => setWorkspaceName(e.target.value)}
+                  maxLength={50}
                   className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </Field>
@@ -275,12 +296,16 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                   <input
                     type="password"
                     placeholder="Current password"
-                    className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    disabled
+                    title="Coming soon"
+                    className="w-full cursor-not-allowed rounded-md border bg-background px-3 py-1.5 text-sm opacity-60 focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   <input
                     type="password"
                     placeholder="New password"
-                    className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    disabled
+                    title="Coming soon"
+                    className="w-full cursor-not-allowed rounded-md border bg-background px-3 py-1.5 text-sm opacity-60 focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
               </Field>
@@ -289,7 +314,10 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 description="Require a second factor on every sign-in."
                 checked={true}
                 onChange={() => {}}
+                disabled
+                disabledReason="Coming soon"
               />
+              <SaveBar />
             </Section>
           )}
 
@@ -306,7 +334,11 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                       Renews May 28, 2026 · $192/mo
                     </div>
                   </div>
-                  <button className="rounded-md border px-3 py-1.5 text-xs hover:bg-accent">
+                  <button
+                    disabled
+                    title="Coming soon"
+                    className="cursor-not-allowed rounded-md border px-3 py-1.5 text-xs opacity-60"
+                  >
                     Manage plan
                   </button>
                 </div>
@@ -324,6 +356,10 @@ async function fetchGitHubConnection(): Promise<GitHubConnectionState> {
   const payload = (await res.json()) as { connection?: GitHubConnectionState; error?: string };
   if (!res.ok || !payload.connection) throw new Error(payload.error ?? "Could not load GitHub connection");
   return payload.connection;
+}
+
+function backgroundServiceLabel(daemon?: { running?: boolean } | null): string {
+  return daemon?.running ? "Background service: Active" : "Background service: Stopped";
 }
 
 interface HarnessDaemonStatus {
@@ -433,9 +469,9 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
             <Bot className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <div className="text-sm font-medium">Codex Harness</div>
+            <div className="text-sm font-medium">Clarise Automation</div>
             <div className="text-xs text-muted-foreground">
-              Automatically dispatch eligible Clarise tasks through Codex App Server.
+              Automatically assign ready tasks to Clarise, your AI coding assistant.
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
               <span
@@ -451,10 +487,7 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
               </span>
               <span className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-muted-foreground">
                 <Activity className="h-3 w-3" />
-                {daemonLabel(daemon)}
-              </span>
-              <span className="rounded-md border px-2 py-0.5 text-muted-foreground">
-                {automation?.provider ?? "codex_app_server"}
+                {backgroundServiceLabel(daemon)}
               </span>
             </div>
             {lastDecision?.reason && (
@@ -831,11 +864,15 @@ function ToggleRow({
   description,
   checked,
   onChange,
+  disabled,
+  disabledReason,
 }: {
   label: string;
   description: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-md border p-3">
@@ -845,9 +882,12 @@ function ToggleRow({
       </div>
       <button
         onClick={() => onChange(!checked)}
+        disabled={disabled}
+        title={disabled ? disabledReason : undefined}
         className={cn(
           "relative h-5 w-9 rounded-full transition-colors shrink-0",
           checked ? "bg-primary" : "bg-muted",
+          disabled && "cursor-not-allowed opacity-60",
         )}
         aria-pressed={checked}
         aria-label={label}
@@ -866,8 +906,11 @@ function ToggleRow({
 function SaveBar() {
   return (
     <div className="flex justify-end gap-2 pt-2">
-      <button className="rounded-md border px-3 py-1.5 text-xs hover:bg-accent">Cancel</button>
-      <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90">
+      <button
+        disabled
+        title="Coming soon"
+        className="cursor-not-allowed rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground opacity-60"
+      >
         Save changes
       </button>
     </div>

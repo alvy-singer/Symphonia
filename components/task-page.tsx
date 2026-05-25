@@ -442,7 +442,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     const trimmed = feedback.trim();
 
     if (!trimmed) {
-      setFeedbackError("Describe what the Coding Assistant should fix.");
+      setFeedbackError("Describe what Clarise should fix.");
       return;
     }
 
@@ -450,7 +450,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     setError(null);
     setFeedbackError(null);
     setNotice(
-      "Changes requested. Clarise turned your feedback into requested changes, and the Coding Assistant is continuing the task.",
+      "Changes requested. Clarise turned your feedback into requested changes and is continuing the task.",
     );
 
     try {
@@ -513,7 +513,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 
       {(pending === "coding_assistant_run" || activeRun) && (
         <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
-          <span>The Coding Assistant is working on this task.</span>
+              <span>Clarise is working on this task.</span>
           {activeRun?.currentStep && (
             <span className="ml-2 text-foreground">{activeRun.currentStep}</span>
           )}
@@ -523,7 +523,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       {(pending === "request_changes" || notice) && (
         <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
           {notice ??
-            "Changes requested. Clarise turned your feedback into requested changes, and the Coding Assistant is continuing the task."}
+                "Changes requested. Clarise turned your feedback into requested changes and is continuing the task."}
         </div>
       )}
 
@@ -641,7 +641,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
               <div className="mt-4 rounded-md border bg-card p-3 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-medium">What should the Coding Assistant fix?</h2>
+                    <h2 className="text-sm font-medium">What should Clarise fix?</h2>
                     <p className="mt-1 text-xs text-muted-foreground">
                       Clarise will turn this into requested changes for the next run.
                     </p>
@@ -742,7 +742,7 @@ function TaskMeta({
       <Section title="Project">
         <span className="text-muted-foreground">{task.project ?? "No project"}</span>
       </Section>
-      <Section title="Coding Assistant">
+              <Section title="Clarise">
         <div className="inline-flex items-center gap-1.5">
           <Sparkles className="h-3 w-3 text-violet-500" />
           <span>{task.assistant || "Not assigned"}</span>
@@ -897,7 +897,7 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
     case "todo":
       return [
         {
-          label: "Assign to Coding Assistant",
+          label: "Assign to Clarise",
           kind: "coding_assistant_run",
           icon: <Sparkles className="h-3.5 w-3.5" />,
           primary: true,
@@ -917,7 +917,7 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
       if (task.pausedReason !== "run_failed") return [];
       return [
         {
-          label: "Retry with Coding Assistant",
+          label: "Retry with Clarise",
           kind: "coding_assistant_run",
           icon: <RotateCcw className="h-3.5 w-3.5" />,
           primary: true,

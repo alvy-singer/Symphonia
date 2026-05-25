@@ -239,7 +239,7 @@ function TaskCard({
         </div>
       </Link>
       <div className="mt-2 flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground">{task.assistant ?? "No assistant"}</span>
+        <span className="text-[10px] text-muted-foreground">{task.assistant ?? "Unassigned"}</span>
         {task.assignee && <UserAvatar user={task.assignee} size={18} />}
       </div>
       <TaskActionBar task={task} repoSlug={repoSlug} onEvent={onEvent} pending={pending} compact />
@@ -562,9 +562,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-semibold">Overview</span>
-          <span className="text-muted-foreground">·</span>
-          <span className="text-muted-foreground">Tasks</span>
+          <span className="font-semibold">Tasks</span>
           <span className="text-muted-foreground tabular-nums">{filtered.length}</span>
           <span
             className={cn(
@@ -619,10 +617,18 @@ export function TasksView({ repoKey }: { repoKey: string }) {
               </option>
             ))}
           </select>
-          <button className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] hover:bg-muted">
+          <button
+            disabled
+            title="Coming soon"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
+          >
             <Filter className="h-3.5 w-3.5" /> Filter
           </button>
-          <button className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] hover:bg-muted">
+          <button
+            disabled
+            title="Coming soon"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] text-muted-foreground opacity-60"
+          >
             <SlidersHorizontal className="h-3.5 w-3.5" /> Display
           </button>
           <button
@@ -642,8 +648,7 @@ export function TasksView({ repoKey }: { repoKey: string }) {
 
       {automation && !automation.enabled && !loading && (
         <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-          Codex harness automation is disabled for this repository. Manual assign, retry, approve,
-          and request-changes actions remain available.
+          Clarise automation is turned off. You can still assign and manage tasks manually.
         </div>
       )}
 
@@ -683,24 +688,24 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           <div className="flex flex-wrap items-center gap-2">
             {!workspace.initialized && (
               <>
-                <span className="text-muted-foreground">Workspace folders are missing.</span>
+                <span className="text-muted-foreground">This repository needs to be set up.</span>
                 <button
                   onClick={createWorkspaceFolders}
                   disabled={workspacePending}
                   className="rounded-md border bg-background px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {workspacePending ? "Creating…" : "Create workspace folders"}
+                  {workspacePending ? "Setting up…" : "Set up repository"}
                 </button>
               </>
             )}
             {!workspace.workflow.exists && (
               <>
-                <span className="text-muted-foreground">WORKFLOW.md is missing.</span>
+                <span className="text-muted-foreground">Automation rules haven&apos;t been set up yet.</span>
                 <Link
                   href={`/r/${repoSlug}/workflow`}
                   className="rounded-md border bg-background px-2 py-1 hover:bg-muted"
                 >
-                  Create from template
+                  Set up automation
                 </Link>
               </>
             )}
@@ -710,11 +715,12 @@ export function TasksView({ repoKey }: { repoKey: string }) {
 
       {loading ? (
         <div className="grid flex-1 place-items-center text-sm text-muted-foreground">
-          Loading Markdown tasks…
+          Loading tasks…
         </div>
       ) : view === "board" ? (
-        <div className="flex-1 overflow-auto">
-          <div className="flex min-w-max gap-3 p-3">
+        <div className="relative flex-1 overflow-hidden">
+          <div className="h-full overflow-auto">
+            <div className="flex min-w-max gap-3 p-3">
             {TASK_STATUS_ORDER.map((s) => (
               <div
                 key={s}
@@ -755,7 +761,12 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                 </div>
               </div>
             ))}
+            </div>
           </div>
+          <div
+            className="pointer-events-none absolute right-0 top-0 hidden h-full w-8 bg-gradient-to-l from-background to-transparent md:block"
+            aria-hidden="true"
+          />
         </div>
       ) : (
         <div className="flex-1 overflow-auto">
