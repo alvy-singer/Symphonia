@@ -6,7 +6,7 @@ defmodule SymphoniaService.SpecWorkspace.Store do
   alias SymphoniaService.Markdown
   alias SymphoniaService.SpecWorkspace.{Artifact, Templates}
 
-  @statuses ~w(draft in_discussion ready_for_approval approved archived)
+  @statuses ~w(draft in_discussion requirements_ready plan_ready ready_for_approval approved archived)
 
   @directories [
     "symphonia/codebase",
@@ -131,11 +131,42 @@ defmodule SymphoniaService.SpecWorkspace.Store do
   def create_artifact(repository, type, attrs \\ %{}) do
     validate_collection_type!(type)
     id = next_id(repository, type)
+    create_artifact(repository, type, id, attrs)
+  end
+
+  def create_artifact(repository, type, id, attrs) do
+    validate_collection_type!(type)
+    validate_id!(id)
     {_prefix, directory} = Map.fetch!(@collections, type)
     path = Path.join([repository["path"], directory, "#{id}.md"])
     File.mkdir_p!(Path.dirname(path))
+    if File.exists?(path), do: raise(ArgumentError, "Artifact already exists.")
     write_new_artifact!(path, type, id, attrs)
     read_path(repository, type, path)
+  end
+
+  def create_or_update_artifact(repository, type, id, attrs) when is_map(attrs) do
+    validate_collection_type!(type)
+    validate_id!(id)
+    {_prefix, directory} = Map.fetch!(@collections, type)
+    path = Path.join([repository["path"], directory, "#{id}.md"])
+
+    if File.exists?(path) do
+      patch = %{"metadata" => Map.drop(attrs, ["body"])}
+      patch = if Map.has_key?(attrs, "body"), do: Map.put(patch, "body", attrs["body"]), else: patch
+      update_artifact(repository, type, id, patch)
+    else
+      File.mkdir_p!(Path.dirname(path))
+      write_new_artifact!(path, type, id, attrs)
+      read_path(repository, type, path)
+    end
+  end
+
+  def artifact_exists?(repository, type, id) do
+    validate_collection_type!(type)
+    validate_id!(id)
+    {_prefix, directory} = Map.fetch!(@collections, type)
+    File.exists?(Path.join([repository["path"], directory, "#{id}.md"]))
   end
 
   def next_id(repository, type) do

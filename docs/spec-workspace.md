@@ -1,6 +1,6 @@
 # Spec Workspace
 
-Symphonia is being reframed toward a spec-to-agent workspace. The current app still keeps the older repository workspace for tasks, reviews, run summaries, and `WORKFLOW.md`; the Spec Workspace extends that existing file shell with semantic Markdown files for planning and product intent.
+Symphonia is being reframed as a repository planning workspace. The current app still keeps the older repository workspace for tasks, reviews, run summaries, and `WORKFLOW.md`; the Spec Workspace extends that existing file shell with semantic Markdown files for planning and product intent.
 
 ## Repo-backed files
 
@@ -22,7 +22,7 @@ symphonia/
   run-summaries/
 ```
 
-Each spec file is Markdown with YAML frontmatter:
+Each spec file is Markdown with a metadata block:
 
 ```markdown
 ---
@@ -60,4 +60,4 @@ Task files under `symphonia/tasks/` keep the existing task lifecycle: To-do, In 
 
 ## Later Work
 
-This foundation lets Clarise create and update durable workspace files first. Later milestones can add the full milestone-planning loop, plan approval, and plan-to-task compilation so approved plans can become Coding Assistant tasks.
+This foundation lets Clarise create and update durable workspace files first. Milestone 9 adds the milestone-planning loop and plan approval. Later milestones can add plan-to-task compilation so approved plans can become Coding Assistant tasks.

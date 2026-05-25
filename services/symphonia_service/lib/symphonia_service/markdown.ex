@@ -1,6 +1,6 @@
 defmodule SymphoniaService.Markdown do
   @moduledoc """
-  Small YAML-frontmatter parser/serializer for task and spec artifact schemas.
+  Small Markdown metadata parser/serializer for task and spec artifact schemas.
 
   It supports the subset used by Symphonia task files:
 
@@ -40,7 +40,13 @@ defmodule SymphoniaService.Markdown do
     "next_review_action",
     "created_at",
     "updated_at",
-    "source"
+    "source",
+    "discussion",
+    "requirements",
+    "plan",
+    "decisions",
+    "related_milestone",
+    "approved_at"
   ]
 
   def parse(text) when is_binary(text) do
@@ -165,6 +171,7 @@ defmodule SymphoniaService.Markdown do
   defp next_line_is_nested?([], _indent), do: false
 
   defp parse_scalar(""), do: nil
+  defp parse_scalar("[]"), do: []
   defp parse_scalar("true"), do: true
   defp parse_scalar("false"), do: false
 
@@ -184,7 +191,7 @@ defmodule SymphoniaService.Markdown do
 
   defp render_entry(key, values) when is_list(values) do
     if Enum.empty?(values) do
-      "#{key}:"
+      "#{key}: []"
     else
       [key <> ":" | Enum.map(values, &"  - #{format_scalar(&1)}")]
       |> Enum.join("\n")

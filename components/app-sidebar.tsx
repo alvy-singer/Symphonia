@@ -15,6 +15,7 @@ import {
   Sun,
   Users,
   ArrowLeft,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/theme-provider";
@@ -135,6 +136,13 @@ export function AppSidebar({ repoKey }: Props) {
             icon={<KanbanSquare className="h-3.5 w-3.5" />}
             active={pathname === `${base}/tasks`}
             hint="Board / List"
+          />
+          <NavLink
+            to={`${base}/workspace`}
+            label="Workspace"
+            icon={<BookOpen className="h-3.5 w-3.5" />}
+            active={pathname === `${base}/workspace`}
+            hint="Clarise"
           />
         </nav>
 

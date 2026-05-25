@@ -78,6 +78,8 @@ const SPEC_TYPE_LABELS: Record<SpecArtifactType, string> = {
 const SPEC_STATUS_LABELS: Record<SpecArtifactStatus, string> = {
   draft: "Draft",
   in_discussion: "In discussion",
+  requirements_ready: "Requirements ready",
+  plan_ready: "Plan ready",
   ready_for_approval: "Ready for approval",
   approved: "Approved",
   archived: "Archived",

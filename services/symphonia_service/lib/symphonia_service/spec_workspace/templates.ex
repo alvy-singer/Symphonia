@@ -18,10 +18,17 @@ defmodule SymphoniaService.SpecWorkspace.Templates do
 
   def frontmatter(type, id, attrs \\ %{}) do
     now = now()
+    attrs = normalize_attrs(attrs)
     title = string_attr(attrs, "title") || title(type)
     status = string_attr(attrs, "status") || "draft"
 
-    %{
+    extras =
+      attrs
+      |> Map.drop(["body", "type", "id", "title", "status", "created_at", "updated_at", "source"])
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
+
+    Map.merge(extras, %{
       "type" => type,
       "id" => id,
       "title" => title,
@@ -29,7 +36,7 @@ defmodule SymphoniaService.SpecWorkspace.Templates do
       "created_at" => now,
       "updated_at" => now,
       "source" => string_attr(attrs, "source") || "clarise"
-    }
+    })
   end
 
   def body("codebase_map", _id, _attrs) do
@@ -168,8 +175,14 @@ defmodule SymphoniaService.SpecWorkspace.Templates do
     """
   end
 
+  defp normalize_attrs(attrs) when is_map(attrs) do
+    attrs
+    |> Enum.map(fn {key, value} -> {to_string(key), value} end)
+    |> Map.new()
+  end
+
   defp string_attr(attrs, key) do
-    case Map.get(attrs, key) || Map.get(attrs, String.to_atom(key)) do
+    case Map.get(attrs, key) do
       value when is_binary(value) ->
         value = String.trim(value)
         if value == "", do: nil, else: value

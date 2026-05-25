@@ -13,6 +13,7 @@ defmodule SymphoniaService.HTTPServer do
     Workspace
   }
 
+  alias SymphoniaService.Clarise.MilestoneLoop
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
 
   def start_link(opts) do
@@ -68,6 +69,10 @@ defmodule SymphoniaService.HTTPServer do
   end
 
   defp route(%{method: "OPTIONS"}, _registry_path), do: {204, %{}}
+
+  defp route(%{method: "GET", path: "/healthz"}, _registry_path) do
+    {200, %{"ok" => true}}
+  end
 
   defp route(%{method: "GET", path: "/api/repositories"}, registry_path) do
     repositories =
@@ -283,6 +288,30 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         artifact = SpecWorkspace.create_decision(repository, decode_json(body))
         {201, %{"artifact" => artifact}}
+
+      ["api", "repositories", repo, "clarise", "milestones", "start"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {201, MilestoneLoop.start(repository, decode_json(body))}
+
+      ["api", "repositories", repo, "clarise", "milestones", milestone, "discuss"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, MilestoneLoop.discuss(repository, milestone, decode_json(body))}
+
+      ["api", "repositories", repo, "clarise", "milestones", milestone, "requirements"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {201, MilestoneLoop.requirements(repository, milestone, decode_json(body))}
+
+      ["api", "repositories", repo, "clarise", "milestones", milestone, "plan"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {201, MilestoneLoop.plan(repository, milestone, decode_json(body))}
+
+      ["api", "repositories", repo, "clarise", "milestones", milestone, "decisions"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {201, MilestoneLoop.decision(repository, milestone, decode_json(body))}
+
+      ["api", "repositories", repo, "clarise", "milestones", milestone, "approve"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, MilestoneLoop.approve(repository, milestone, decode_json(body))}
 
       ["api", "repositories", repo, "github", "link"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)

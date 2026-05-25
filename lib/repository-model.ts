@@ -20,6 +20,8 @@ export type SpecArtifactType =
 export type SpecArtifactStatus =
   | "draft"
   | "in_discussion"
+  | "requirements_ready"
+  | "plan_ready"
   | "ready_for_approval"
   | "approved"
   | "archived";
@@ -49,6 +51,12 @@ export interface SpecArtifact {
     created_at?: string;
     updated_at?: string;
     source?: string;
+    discussion?: string;
+    requirements?: string;
+    plan?: string;
+    decisions?: string[];
+    related_milestone?: string;
+    approved_at?: string;
   };
   body: string;
 }
