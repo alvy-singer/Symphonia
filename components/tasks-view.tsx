@@ -111,6 +111,11 @@ type TaskAction =
       label: string;
       kind: "view_pr";
       href: string;
+    }
+  | {
+      label: string;
+      kind: "open_task";
+      primary?: boolean;
     };
 
 function TaskCard({
@@ -158,7 +163,7 @@ function TaskCard({
         <span className="text-[10px] text-muted-foreground">{task.assistant ?? "No assistant"}</span>
         {task.assignee && <UserAvatar user={task.assignee} size={18} />}
       </div>
-      <TaskActionBar task={task} onEvent={onEvent} pending={pending} compact />
+      <TaskActionBar task={task} repoSlug={repoSlug} onEvent={onEvent} pending={pending} compact />
     </article>
   );
 }
@@ -203,7 +208,7 @@ function TaskRow({
           </span>
         )}
         {task.assignee && <UserAvatar user={task.assignee} size={20} />}
-        <TaskActionBar task={task} onEvent={onEvent} pending={pending} />
+        <TaskActionBar task={task} repoSlug={repoSlug} onEvent={onEvent} pending={pending} />
       </div>
     </div>
   );
@@ -330,14 +335,9 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     task: ServiceTask,
     action: TaskAction,
   ) => {
-    if (action.kind === "view_pr") return;
+    if (action.kind === "view_pr" || action.kind === "open_task") return;
 
-    let eventParams = action.kind === "event" ? action.params : undefined;
-    if (action.kind === "event" && action.event === "request_changes" && !eventParams?.feedback) {
-      const feedback = window.prompt("What should the Coding Assistant fix?");
-      if (!feedback) return;
-      eventParams = { feedback };
-    }
+    const eventParams = action.kind === "event" ? action.params : undefined;
     setPendingKey(task.key);
     try {
       const updated =
@@ -544,11 +544,13 @@ export function TasksView({ repoKey }: { repoKey: string }) {
 
 function TaskActionBar({
   task,
+  repoSlug,
   onEvent,
   pending,
   compact,
 }: {
   task: ServiceTask;
+  repoSlug: string;
   onEvent: (
     task: ServiceTask,
     action: TaskAction,
@@ -572,6 +574,17 @@ function TaskActionBar({
           >
             {action.label}
           </a>
+        ) : action.kind === "open_task" ? (
+          <Link
+            key={action.kind}
+            href={`/r/${repoSlug}/tasks/${encodeURIComponent(task.key)}`}
+            className={cn(
+              "rounded-md border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground",
+              action.primary && "border-primary/30 bg-primary/5 text-foreground",
+            )}
+          >
+            {action.label}
+          </Link>
         ) : (
           <button
             key={action.kind === "event" ? action.event : action.kind}
@@ -612,7 +625,7 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
       }
       return [
         { label: "Approve", kind: "event", event: "approve", primary: true },
-        { label: "Request changes", kind: "event", event: "request_changes" },
+        { label: "Request changes", kind: "open_task" },
       ];
     case "completed":
     case "canceled":

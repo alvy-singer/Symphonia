@@ -13,7 +13,7 @@ defmodule SymphoniaService.CodingAssistant.LocalDemoProvider do
       {:error, "The Coding Assistant could not produce a reviewable handoff."}
     else
       file = HandoffBuilder.demo_file(task)
-      body = HandoffBuilder.demo_body(task)
+      body = HandoffBuilder.demo_body(task, Map.get(params, "assistant_input"))
       branch = BranchManager.create_and_push_demo_change(repository, task, file, body)
       {:ok, HandoffBuilder.build(task, branch)}
     end

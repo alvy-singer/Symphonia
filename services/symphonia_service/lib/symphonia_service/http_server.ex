@@ -245,6 +245,24 @@ defmodule SymphoniaService.HTTPServer do
         result = CodingAssistant.start_run(registry_path, repository, task_key, decode_json(body))
         {201, %{"run" => result["run"], "task" => public_task(result["task"])}}
 
+      ["api", "repositories", repo, "tasks", task_key, "review", "request-changes"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        result =
+          CodingAssistant.continue_from_review_notes(
+            registry_path,
+            repository,
+            task_key,
+            decode_json(body)
+          )
+
+        {201,
+         %{
+           "run" => result["run"],
+           "review_note" => result["review_note"],
+           "task" => public_task(result["task"])
+         }}
+
       ["api", "repositories", repo, "tasks", task_key, "open-pull-request"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         task = PullRequests.open_from_task(repository, task_key)

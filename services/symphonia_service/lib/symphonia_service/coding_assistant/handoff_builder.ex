@@ -9,14 +9,21 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
     Path.join(["symphonia", "demo-output", "#{task["key"]}.md"])
   end
 
-  def demo_body(task) do
-    """
+  def demo_body(task, assistant_input \\ nil) do
+    base = """
     # Demo Assistant Output
     This file was created by the Local Demo Assistant for task: #{task["title"]}.
     It proves the Coding Assistant run can create a branch, commit a change, push it, and produce a reviewable handoff.
     """
-    |> String.trim_trailing()
-    |> Kernel.<>("\n")
+
+    body =
+      if is_binary(assistant_input) and String.trim(assistant_input) != "" do
+        base <> "\n## Continuation input\n\n" <> String.trim(assistant_input) <> "\n"
+      else
+        base
+      end
+
+    body |> String.trim_trailing() |> Kernel.<>("\n")
   end
 
   def build(task, branch) do

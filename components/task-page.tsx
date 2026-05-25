@@ -15,6 +15,7 @@ import { PRIORITY_LABELS } from "@/data/mock";
 import {
   TASK_STATUS_LABELS,
   pausedReasonLabel,
+  type ReviewNote,
   type ServiceTask,
   type TaskLifecycleEvent,
 } from "@/lib/task-model";
@@ -114,6 +115,30 @@ async function startCodingAssistantRun(
   return data.task;
 }
 
+async function requestTaskChanges(
+  repoKey: string,
+  taskKey: string,
+  feedback: string,
+): Promise<{ task: ServiceTask; reviewNote: ReviewNote }> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/review/request-changes`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feedback }),
+    },
+  );
+  const data = (await res.json()) as {
+    task?: ServiceTask;
+    review_note?: ReviewNote;
+    error?: string;
+  };
+  if (!res.ok || !data.task) throw new Error(data.error ?? "Could not request changes");
+  return { task: data.task, reviewNote: data.review_note as ReviewNote };
+}
+
 type TaskAction =
   | {
       label: string;
@@ -125,7 +150,7 @@ type TaskAction =
     }
   | {
       label: string;
-      kind: "coding_assistant_run" | "open_pull_request" | "refresh_pr";
+      kind: "coding_assistant_run" | "open_pull_request" | "refresh_pr" | "request_changes";
       icon: React.ReactNode;
       primary?: boolean;
     }
@@ -150,6 +175,10 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [requestBoxOpen, setRequestBoxOpen] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const clarise = useClarise();
   const taskKey = pageIdOrTaskKey;
@@ -165,6 +194,10 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         setTitle(loaded.title);
         setBody(loaded.body);
         setDirty(false);
+        setNotice(null);
+        setRequestBoxOpen(false);
+        setFeedback("");
+        setFeedbackError(null);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not load task");
@@ -198,17 +231,11 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     params?: Record<string, unknown>,
   ) => {
     if (!task) return;
-    let nextParams = params;
-    if (event === "request_changes" && !nextParams?.feedback) {
-      const feedback = window.prompt("What should the Coding Assistant fix?");
-      if (!feedback) return;
-      nextParams = { feedback };
-    }
 
     setPending(event);
     setError(null);
     try {
-      const updated = await postTaskEvent(repoKey, task.key, event, nextParams);
+      const updated = await postTaskEvent(repoKey, task.key, event, params);
       setTask(updated);
       setTitle(updated.title);
       setBody(updated.body);
@@ -230,6 +257,12 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 
     if (action.kind === "view_pr") return;
 
+    if (action.kind === "request_changes") {
+      setRequestBoxOpen(true);
+      setFeedbackError(null);
+      return;
+    }
+
     setPending(action.kind);
     setError(null);
     try {
@@ -245,6 +278,38 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setDirty(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update task");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const sendChanges = async () => {
+    if (!task) return;
+    const trimmed = feedback.trim();
+
+    if (!trimmed) {
+      setFeedbackError("Describe what the Coding Assistant should fix.");
+      return;
+    }
+
+    setPending("request_changes");
+    setError(null);
+    setFeedbackError(null);
+    setNotice(
+      "Changes requested. Clarise turned your feedback into requested changes, and the Coding Assistant is continuing the task.",
+    );
+
+    try {
+      const { task: updated } = await requestTaskChanges(repoKey, task.key, trimmed);
+      setTask(updated);
+      setTitle(updated.title);
+      setBody(updated.body);
+      setDirty(false);
+      setRequestBoxOpen(false);
+      setFeedback("");
+    } catch (err) {
+      setNotice(null);
+      setError(err instanceof Error ? err.message : "Could not request changes");
     } finally {
       setPending(null);
     }
@@ -293,6 +358,13 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       {pending === "coding_assistant_run" && (
         <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
           The Coding Assistant is working on this task.
+        </div>
+      )}
+
+      {(pending === "request_changes" || notice) && (
+        <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          {notice ??
+            "Changes requested. Clarise turned your feedback into requested changes, and the Coding Assistant is continuing the task."}
         </div>
       )}
 
@@ -384,6 +456,55 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
                 {pending === "save" ? "Saving…" : dirty ? "Save Markdown" : "Saved"}
               </button>
             </div>
+
+            {requestBoxOpen && (
+              <div className="mt-4 rounded-md border bg-card p-3 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-medium">What should the Coding Assistant fix?</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Clarise will turn this into requested changes for the next run.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRequestBoxOpen(false);
+                      setFeedback("");
+                      setFeedbackError(null);
+                    }}
+                    disabled={pending != null}
+                    className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <textarea
+                  value={feedback}
+                  onChange={(event) => {
+                    setFeedback(event.target.value);
+                    if (feedbackError) setFeedbackError(null);
+                  }}
+                  aria-label="Requested changes feedback"
+                  className="mt-3 min-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  placeholder="The card is still too dense. Remove validation from the default card..."
+                />
+                {feedbackError && (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{feedbackError}</p>
+                )}
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={sendChanges}
+                    disabled={pending != null}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {pending === "request_changes" ? "Sending…" : "Send changes"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <textarea
               ref={bodyRef}
@@ -597,8 +718,7 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
         },
         {
           label: "Request changes",
-          kind: "event",
-          event: "request_changes",
+          kind: "request_changes",
           icon: <RotateCcw className="h-3.5 w-3.5" />,
         },
       ];

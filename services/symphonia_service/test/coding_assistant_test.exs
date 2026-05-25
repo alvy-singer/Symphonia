@@ -184,6 +184,126 @@ defmodule SymphoniaService.CodingAssistantTest do
     assert updated["githubPr"] == "https://github.com/agora-creations/symphonia/pull/789"
   end
 
+  test "request changes saves review notes and continues from checklist only", %{
+    registry_path: registry_path,
+    repo_path: repo_path,
+    remote_path: remote_path,
+    repository: repository,
+    runs_root: runs_root,
+    task: task
+  } do
+    CodingAssistant.start_run(registry_path, repository, task["key"])
+
+    feedback =
+      "The card is still too dense. Remove validation from the default card, make the project label smaller, and show retry only when paused."
+
+    result =
+      CodingAssistant.continue_from_review_notes(registry_path, repository, task["key"], %{
+        "feedback" => feedback
+      })
+
+    assert result["run"]["state"] == "completed"
+    assert result["task"]["status"] == "in_review"
+    assert result["review_note"]["original_feedback"] == feedback
+
+    assert result["review_note"]["requested_changes"] == [
+             "Make task cards less dense.",
+             "Remove validation from the default card.",
+             "Make the project label visually smaller.",
+             "Show the retry action only when the task is paused."
+           ]
+
+    task_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
+    assert task_markdown =~ "## Review notes"
+    assert task_markdown =~ "## Handoff history"
+    assert task_markdown =~ "Original feedback:\n#{feedback}"
+    assert task_markdown =~ "- [ ] Make task cards less dense."
+    assert task_markdown =~ "review_continuation:"
+
+    continuation_run =
+      runs_root
+      |> Path.join("run_*.json")
+      |> Path.wildcard()
+      |> Enum.map(&JSON.decode!(File.read!(&1)))
+      |> Enum.find(&(&1["kind"] == "review_continuation"))
+
+    assert continuation_run["state"] == "completed"
+    assert continuation_run["attempt"] == 1
+    assert continuation_run["input"] =~ "Requested changes:"
+    assert continuation_run["input"] =~ "- Make task cards less dense."
+    refute continuation_run["input"] =~ "The card is still too dense"
+    assert continuation_run["raw_log"]
+
+    demo_output =
+      git_output!([
+        "--git-dir",
+        remote_path,
+        "show",
+        "refs/heads/symphonia/task/sym-1:symphonia/demo-output/SYM-1.md"
+      ])
+
+    assert demo_output =~ "## Continuation input"
+    assert demo_output =~ "Requested changes:"
+    assert demo_output =~ "- Show the retry action only when the task is paused."
+    refute demo_output =~ "The card is still too dense"
+
+    branch_files =
+      git_output!([
+        "--git-dir",
+        remote_path,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "refs/heads/symphonia/task/sym-1"
+      ])
+
+    assert branch_files =~ "symphonia/demo-output/SYM-1.md"
+    refute branch_files =~ "symphonia/tasks/SYM-1.md"
+  end
+
+  test "continuation retry limit is scoped to the current review cycle", %{
+    registry_path: registry_path,
+    repo_path: repo_path,
+    repository: repository,
+    runs_root: runs_root,
+    task: task
+  } do
+    CodingAssistant.start_run(registry_path, repository, task["key"])
+
+    first_result =
+      CodingAssistant.continue_from_review_notes(registry_path, repository, task["key"], %{
+        "feedback" => "Remove validation from the default card.",
+        "forceFailureOnce" => true
+      })
+
+    assert first_result["task"]["status"] == "in_review"
+
+    first_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
+    assert first_markdown =~ "attempt: 2"
+    assert first_markdown =~ first_result["review_note"]["id"]
+
+    second_result =
+      CodingAssistant.continue_from_review_notes(registry_path, repository, task["key"], %{
+        "feedback" => "Make the project label smaller."
+      })
+
+    assert second_result["task"]["status"] == "in_review"
+
+    second_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
+    assert second_markdown =~ "attempt: 1"
+    assert second_markdown =~ second_result["review_note"]["id"]
+    refute second_result["review_note"]["id"] == first_result["review_note"]["id"]
+
+    continuation_runs =
+      runs_root
+      |> Path.join("run_*.json")
+      |> Path.wildcard()
+      |> Enum.map(&JSON.decode!(File.read!(&1)))
+      |> Enum.filter(&(&1["kind"] == "review_continuation"))
+
+    assert Enum.count(continuation_runs) == 3
+  end
+
   test "failed local demo run pauses the task with run failed", %{
     registry_path: registry_path,
     repository: repository,
@@ -195,6 +315,42 @@ defmodule SymphoniaService.CodingAssistantTest do
     assert result["run"]["state"] == "failed"
     assert result["task"]["status"] == "paused"
     assert result["task"]["pausedReason"] == "run_failed"
+  end
+
+  test "two failed continuation attempts pause the task with run failed", %{
+    registry_path: registry_path,
+    repo_path: repo_path,
+    repository: repository,
+    runs_root: runs_root,
+    task: task
+  } do
+    CodingAssistant.start_run(registry_path, repository, task["key"])
+
+    result =
+      CodingAssistant.continue_from_review_notes(registry_path, repository, task["key"], %{
+        "feedback" => "Remove validation from the default card.",
+        "forceFailure" => true
+      })
+
+    assert result["run"]["state"] == "failed"
+    assert result["task"]["status"] == "paused"
+    assert result["task"]["pausedReason"] == "run_failed"
+    assert result["task"]["pausedExplanation"] ==
+             "The Coding Assistant could not produce a new handoff after your requested changes."
+
+    task_markdown = File.read!(Path.join([repo_path, "symphonia", "tasks", "SYM-1.md"]))
+    assert task_markdown =~ "attempt: 2"
+    assert task_markdown =~ "paused_reason: run_failed"
+
+    continuation_runs =
+      runs_root
+      |> Path.join("run_*.json")
+      |> Path.wildcard()
+      |> Enum.map(&JSON.decode!(File.read!(&1)))
+      |> Enum.filter(&(&1["kind"] == "review_continuation"))
+
+    assert Enum.count(continuation_runs) == 2
+    assert Enum.all?(continuation_runs, &(&1["state"] == "failed"))
   end
 
   defp setup_git!(root) do

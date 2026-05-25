@@ -6,6 +6,8 @@ defmodule SymphoniaService.Lifecycle do
   @valid_statuses ~w(todo in_progress in_review paused completed canceled)
   @valid_paused_reasons ~w(run_failed waiting_for_user blocked_by_setup waiting_for_sync needs_clarification)
 
+  alias SymphoniaService.Clarise.FeedbackStructurer
+
   def valid_statuses, do: @valid_statuses
   def valid_paused_reasons, do: @valid_paused_reasons
 
@@ -158,22 +160,7 @@ defmodule SymphoniaService.Lifecycle do
   end
 
   def structure_feedback(feedback) do
-    feedback
-    |> String.split(~r/[\n.;]+/)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&sentence_to_action/1)
-  end
-
-  defp sentence_to_action(sentence) do
-    sentence = String.trim_trailing(sentence, ".")
-
-    cond do
-      String.starts_with?(String.downcase(sentence), "remove ") -> sentence
-      String.starts_with?(String.downcase(sentence), "make ") -> sentence
-      String.starts_with?(String.downcase(sentence), "keep ") -> sentence
-      true -> "Address: " <> sentence
-    end
+    FeedbackStructurer.structure(feedback)
   end
 
   defp put_common(frontmatter, now) do

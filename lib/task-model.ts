@@ -66,6 +66,13 @@ export interface CodingAssistantHandoff {
   baseBranch?: string;
 }
 
+export interface ReviewNote {
+  id: string;
+  created_at?: string;
+  original_feedback: string;
+  requested_changes: string[];
+}
+
 export interface ServiceTask {
   key: string;
   title: string;

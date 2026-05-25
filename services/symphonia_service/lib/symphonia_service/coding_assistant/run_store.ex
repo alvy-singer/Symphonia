@@ -23,6 +23,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
         "completed_at" => nil,
         "raw_log" => []
       }
+      |> Map.merge(optional_attrs(attrs))
       |> reject_nil()
 
     save(run, opts)
@@ -95,6 +96,16 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
 
   defp append_log(run, message) do
     Map.update(run, "raw_log", [message], &(List.wrap(&1) ++ [message]))
+  end
+
+  defp optional_attrs(attrs) do
+    Map.take(attrs, [
+      "kind",
+      "input",
+      "review_note_id",
+      "attempt",
+      "max_attempts"
+    ])
   end
 
   defp run_id do

@@ -77,11 +77,32 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
   end
 
   defp push_branch!(repo_path, remote_url, head_branch, askpass) do
+    lease =
+      case remote_head(repo_path, remote_url, head_branch, askpass) do
+        nil -> "--force-with-lease=refs/heads/#{head_branch}:"
+        sha -> "--force-with-lease=refs/heads/#{head_branch}:#{sha}"
+      end
+
     git!(
       repo_path,
-      ["push", "--force-with-lease", remote_url, "HEAD:refs/heads/#{head_branch}"],
+      ["push", lease, remote_url, "HEAD:refs/heads/#{head_branch}"],
       askpass
     )
+  end
+
+  defp remote_head(repo_path, remote_url, head_branch, askpass) do
+    case git(repo_path, ["ls-remote", remote_url, "refs/heads/#{head_branch}"], askpass) do
+      {:ok, ""} ->
+        nil
+
+      {:ok, output} ->
+        output
+        |> String.split()
+        |> List.first()
+
+      {:error, _output} ->
+        nil
+    end
   end
 
   defp current_branch(repo_path) do
