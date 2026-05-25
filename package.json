@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3010",
     "build": "next build",
-    "test:harness-ui": "node --test scripts/harness-ui-model.test.mjs",
+    "test:harness-ui": "node --test scripts/harness-ui-model.test.mjs scripts/scroll-fade-viewport.test.mjs",
     "start": "next start",
     "lint": "next lint"
   },

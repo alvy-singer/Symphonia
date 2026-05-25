@@ -19,6 +19,7 @@ import { TaskStatusIcon } from "@/components/icons/task-status-icons";
 import { PriorityIcon } from "@/components/icons/status-icons";
 import { UserAvatar } from "@/components/avatar-stack";
 import { useNewTask } from "@/components/new-task-dialog";
+import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport";
 import { cn } from "@/lib/utils";
 import { harnessLabel, harnessStatusForTask, isActiveRun } from "@/lib/harness-ui-model";
 import type { RepositoryAutomationState, WorkspaceState } from "@/lib/repository-model";
@@ -718,9 +719,8 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           Loading tasks…
         </div>
       ) : view === "board" ? (
-        <div className="relative flex-1 overflow-hidden">
-          <div className="h-full overflow-auto">
-            <div className="flex min-w-max gap-3 p-3">
+        <ScrollFadeViewport className="flex-1" scrollClassName="h-full overflow-auto">
+          <div className="flex min-w-max gap-3 p-3">
             {TASK_STATUS_ORDER.map((s) => (
               <div
                 key={s}
@@ -761,13 +761,8 @@ export function TasksView({ repoKey }: { repoKey: string }) {
                 </div>
               </div>
             ))}
-            </div>
           </div>
-          <div
-            className="pointer-events-none absolute right-0 top-0 hidden h-full w-8 bg-gradient-to-l from-background to-transparent md:block"
-            aria-hidden="true"
-          />
-        </div>
+        </ScrollFadeViewport>
       ) : (
         <div className="flex-1 overflow-auto">
           {TASK_STATUS_ORDER.map((s) =>

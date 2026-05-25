@@ -21,10 +21,10 @@
 - [x] Phase 2 checkpoint passed (HTTP/static; in-app browser unavailable)
 
 ### Phase 3: Minor
-- [ ] m1: Mobile search
-- [ ] m2: Board scroll indicators
-- [ ] m3: Settings tab overflow
-- [ ] m4: Theme toggle note
+- [x] m1: Mobile search
+- [x] m2: Board scroll indicators
+- [x] m3: Settings tab overflow
+- [x] m4: Theme toggle note
 
 ### Phase 4: Verification
 - [ ] Multi-viewport navigation test
