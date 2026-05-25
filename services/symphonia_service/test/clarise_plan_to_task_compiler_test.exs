@@ -52,6 +52,8 @@ defmodule SymphoniaService.ClarisePlanToTaskCompilerTest do
     assert proposal["metadata"]["created_tasks"] == []
     assert proposal["path"] == "symphonia/task-proposals/milestone-001-task-proposal.md"
     assert proposal["body"] =~ "## Proposed tasks"
+    assert first["nextStep"] == "review_task_proposal"
+    assert first["taskBoard"] == %{"sourceMilestone" => "milestone-001", "createdTasks" => []}
     assert first["items"] == second["items"]
   end
 
@@ -83,6 +85,11 @@ defmodule SymphoniaService.ClarisePlanToTaskCompilerTest do
     assert length(tasks) == 5
     assert result["createdCount"] == 5
     assert result["createdTasks"] == ["SYM-1", "SYM-2", "SYM-3", "SYM-4", "SYM-5"]
+    assert result["nextStep"] == "task_board"
+    assert result["taskBoard"] == %{
+             "sourceMilestone" => "milestone-001",
+             "createdTasks" => ["SYM-1", "SYM-2", "SYM-3", "SYM-4", "SYM-5"]
+           }
 
     [first, second | _rest] = TaskStore.list_tasks(repository)
     assert first["status"] == "todo"

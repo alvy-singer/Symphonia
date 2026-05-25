@@ -50,7 +50,9 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
       "proposal" => proposal,
       "items" => Enum.map(items, &public_item/1),
       "generationId" => generation_id,
-      "createdTasks" => created_tasks
+      "createdTasks" => created_tasks,
+      "nextStep" => if(created_tasks == [], do: "review_task_proposal", else: "task_board"),
+      "taskBoard" => task_board_payload(sources.milestone["id"], created_tasks)
     }
   end
 
@@ -122,7 +124,9 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
       "tasks" => Enum.map(tasks, &public_task/1),
       "createdTasks" => created_tasks,
       "createdCount" => created_count,
-      "generationId" => generation_id
+      "generationId" => generation_id,
+      "nextStep" => "task_board",
+      "taskBoard" => task_board_payload(sources.milestone["id"], created_tasks)
     }
   end
 
@@ -514,6 +518,13 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
 
   defp public_task(task) do
     Map.drop(task, [:repository, :file_path, :frontmatter, :body])
+  end
+
+  defp task_board_payload(source_milestone, created_tasks) do
+    %{
+      "sourceMilestone" => source_milestone,
+      "createdTasks" => created_tasks
+    }
   end
 
   defp metadata_id!(artifact, key, message) do

@@ -283,8 +283,23 @@ export function TasksView({ repoKey }: { repoKey: string }) {
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [workspacePending, setWorkspacePending] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [sourceMilestone, setSourceMilestone] = useState<string | null>(null);
+  const [createdTaskKeys, setCreatedTaskKeys] = useState<string[]>([]);
   const newTask = useNewTask();
   const repoSlug = repoKey.toLowerCase();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const milestone = params.get("sourceMilestone");
+    const created = params
+      .get("created")
+      ?.split(",")
+      .map((key) => key.trim())
+      .filter(Boolean);
+
+    if (milestone) setSourceMilestone(milestone);
+    if (created?.length) setCreatedTaskKeys(created);
+  }, []);
 
   // Hydrate the per-repo view mode from localStorage and listen for command
   // palette toggles ("Switch to Board / List" actions).
@@ -335,8 +350,20 @@ export function TasksView({ repoKey }: { repoKey: string }) {
 
   const filtered = useMemo(
     () =>
-      tasks.filter((i) => priority === "all" || i.priority === priority),
-    [tasks, priority],
+      tasks.filter(
+        (i) =>
+          (priority === "all" || i.priority === priority) &&
+          (!sourceMilestone || i.sourceMilestone === sourceMilestone),
+      ),
+    [tasks, priority, sourceMilestone],
+  );
+
+  const sourceMilestoneTaskCount = useMemo(
+    () =>
+      sourceMilestone
+        ? tasks.filter((task) => task.sourceMilestone === sourceMilestone).length
+        : 0,
+    [sourceMilestone, tasks],
   );
 
   const grouped = useMemo(() => {
@@ -420,6 +447,12 @@ export function TasksView({ repoKey }: { repoKey: string }) {
     }
   };
 
+  const clearSourceMilestone = () => {
+    setSourceMilestone(null);
+    setCreatedTaskKeys([]);
+    window.history.replaceState({}, "", window.location.pathname);
+  };
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5">
@@ -428,6 +461,11 @@ export function TasksView({ repoKey }: { repoKey: string }) {
           <span className="text-muted-foreground">·</span>
           <span className="text-muted-foreground">Tasks</span>
           <span className="text-muted-foreground tabular-nums">{filtered.length}</span>
+          {sourceMilestone && (
+            <span className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
+              {sourceMilestone}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <div className="flex items-center rounded-md border p-0.5" role="group" aria-label="View mode">
@@ -483,6 +521,37 @@ export function TasksView({ repoKey }: { repoKey: string }) {
       {error && (
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
           {error}
+        </div>
+      )}
+
+      {sourceMilestone && !loading && (
+        <div className="border-b bg-emerald-500/10 px-4 py-3 text-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-medium text-emerald-800 dark:text-emerald-200">
+                Task handoff ready
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                Showing {sourceMilestoneTaskCount} To-do tasks from {sourceMilestone}
+                {createdTaskKeys.length > 0 ? ` (${createdTaskKeys.join(", ")})` : ""}. Review the
+                breakdown here, then assign one when the team is ready to start work.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Link
+                href={`/r/${repoSlug}/workspace`}
+                className="rounded-md border bg-background px-2 py-1 text-xs hover:bg-muted"
+              >
+                Back to planning
+              </Link>
+              <button
+                onClick={clearSourceMilestone}
+                className="rounded-md border bg-background px-2 py-1 text-xs hover:bg-muted"
+              >
+                Show all tasks
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

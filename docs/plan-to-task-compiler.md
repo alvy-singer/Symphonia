@@ -28,6 +28,8 @@ After the user confirms, Clarise writes tasks under:
 
 Generated tasks use the existing task lifecycle and start as To-do. They include source metadata such as `source_milestone`, `source_plan`, `generation_id`, and `proposal_item_id` so repeated confirmation of the same proposal does not create duplicates.
 
+After task creation, the workspace routes the lead to the task board filtered to the source milestone. The handoff stops there: reviewing or assigning a task remains a deliberate next action.
+
 ## Review Before Creation
 
 The workspace shows the proposed task breakdown before task files are written. Full inline proposal editing is not required in this milestone. After creation, users can edit task Markdown through the existing task pages.

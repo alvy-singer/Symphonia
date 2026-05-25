@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  ArrowRight,
   CheckCircle2,
   Circle,
   ClipboardList,
@@ -74,6 +76,11 @@ type TaskProposalPayload = {
   createdTasks?: string[];
   createdCount?: number;
   generationId?: string;
+  nextStep?: string;
+  taskBoard?: {
+    sourceMilestone?: string;
+    createdTasks?: string[];
+  };
   error?: string;
 };
 
@@ -103,10 +110,12 @@ const STEPS = [
   { key: "discussion", label: "Discuss", icon: MessageSquareText },
   { key: "requirements", label: "Requirements", icon: ListChecks },
   { key: "plan", label: "Plan", icon: FileText },
-  { key: "approval", label: "Approval", icon: ShieldCheck },
+  { key: "approval", label: "Approve plan", icon: ShieldCheck },
+  { key: "tasks", label: "Task handoff", icon: ClipboardList },
 ] as const;
 
 export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
+  const router = useRouter();
   const repoSlug = repoKey.toLowerCase();
   const [workspace, setWorkspace] = useState<SpecWorkspacePayload | null>(null);
   const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
@@ -293,11 +302,28 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
 
   const createTasksFromProposal = () => {
     if (!milestone) return;
-    void runTaskCompiler(
-      "task-create",
-      () => postTaskCompiler(repoKey, milestone.id, "create", {}),
-      "Tasks created.",
-    );
+    void (async () => {
+      setPending("task-create");
+      setError(null);
+      setNotice(null);
+      try {
+        const payload = await postTaskCompiler(repoKey, milestone.id, "create", {});
+        setTaskProposal(payload);
+        window.dispatchEvent(
+          new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }),
+        );
+
+        const createdTasks =
+          payload.createdTasks ??
+          payload.taskBoard?.createdTasks ??
+          metadataList(payload.proposal, "created_tasks");
+        router.push(taskBoardHref(repoSlug, milestone.id, createdTasks));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Clarise could not create tasks");
+      } finally {
+        setPending(null);
+      }
+    })();
   };
 
   if (loading) {
@@ -314,7 +340,10 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium uppercase text-muted-foreground">Workspace</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-normal">Clarise milestone setup</h1>
+            <h1 className="mt-1 text-2xl font-semibold tracking-normal">Planning handoff</h1>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+              Turn a milestone idea into reviewed, repo-backed tasks before any agent starts work.
+            </p>
           </div>
           <button
             onClick={() => void startMilestone()}
@@ -328,7 +357,7 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
       </header>
 
       <main className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
-        <WorkflowRail milestone={milestone} linked={linked} />
+        <WorkflowRail milestone={milestone} linked={linked} proposal={taskProposal} />
 
         <div className="min-w-0 space-y-5">
           {error && <Notice tone="warn">{error}</Notice>}
@@ -381,7 +410,8 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
                   <div className="rounded-md border bg-muted/20 p-3">
                     <p className="text-sm font-medium">Clarise will shape this into durable files.</p>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      Clarise will help turn your idea into a milestone, requirements, and a plan.
+                      The source of truth stays in Markdown under this repository, so the team can
+                      inspect the milestone, requirements, plan, and task proposal before work begins.
                     </p>
                     <dl className="mt-4 space-y-2 text-xs">
                       <MetaLine label="Discussion" value={metadataString(milestone, "discussion")} />
@@ -432,10 +462,10 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
                   <div className="flex items-start gap-3">
                     <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-500" />
                     <div>
-                      <h2 className="text-base font-semibold">Milestone approved</h2>
+                      <h2 className="text-base font-semibold">Plan approved</h2>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        Clarise can now turn this plan into implementation tasks. Creating tasks does
-                        not start Coding Assistant work.
+                        Clarise can now turn this plan into implementation tasks. Creating tasks
+                        only writes To-do Markdown files; assigning work remains a separate action.
                       </p>
                     </div>
                   </div>
@@ -461,16 +491,24 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
   );
 }
 
-function WorkflowRail({ milestone, linked }: { milestone: SpecArtifact | null; linked: LinkedArtifacts }) {
-  const activeIndex = workflowIndex(milestone, linked);
+function WorkflowRail({
+  milestone,
+  linked,
+  proposal,
+}: {
+  milestone: SpecArtifact | null;
+  linked: LinkedArtifacts;
+  proposal: TaskProposalPayload | null;
+}) {
+  const activeIndex = workflowIndex(milestone, linked, proposal);
 
   return (
     <aside className="border-b pb-4 lg:border-b-0 lg:border-r lg:pr-4">
-      <ol className="grid gap-2 sm:grid-cols-5 lg:grid-cols-1">
+      <ol className="grid gap-2 sm:grid-cols-6 lg:grid-cols-1">
         {STEPS.map((step, index) => {
           const Icon = step.icon;
-          const done = index < activeIndex || milestone?.status === "approved";
-          const active = index === activeIndex && milestone?.status !== "approved";
+          const done = index < activeIndex;
+          const active = index === activeIndex;
 
           return (
             <li
@@ -512,9 +550,10 @@ function EmptyMilestoneState({
         <span className="mx-auto grid h-11 w-11 place-items-center rounded-md bg-muted text-emerald-600">
           <Milestone className="h-5 w-5" />
         </span>
-        <h2 className="mt-4 text-xl font-semibold">Start a new milestone with Clarise</h2>
+        <h2 className="mt-4 text-xl font-semibold">Start a planning handoff with Clarise</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Clarise will help turn your idea into a milestone, requirements, and a plan.
+          Clarise will help turn a rough milestone idea into requirements, a plan, a reviewed
+          task proposal, and To-do tasks on the board.
         </p>
         <button
           onClick={onStart}
@@ -568,7 +607,9 @@ function DiscussionForm({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">Discuss milestone</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Answer what matters now. Clarise saves the discussion as Markdown.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Answer what matters now. Clarise saves the discussion as Markdown.
+          </p>
         </div>
         <button
           onClick={onSave}
@@ -622,7 +663,7 @@ function ArtifactProgress({
 
   return (
     <section className="border-y py-5">
-      <h2 className="text-base font-semibold">Milestone artifacts</h2>
+      <h2 className="text-base font-semibold">Planning artifacts</h2>
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <ArtifactPane
           title="Discussion"
@@ -817,10 +858,9 @@ function TaskProposalPanel({
     <section className="border-y py-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold">Implementation tasks</h2>
+          <h2 className="text-base font-semibold">Task proposal</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Clarise proposes task files for review first. You create them only after the
-            breakdown looks right.
+            Review the proposed task breakdown before Symphonia writes any task files.
           </p>
         </div>
         {proposal?.proposal && (
@@ -839,7 +879,7 @@ function TaskProposalPanel({
           <div>
             <p className="text-sm font-medium">Milestone approved</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Clarise can now turn this plan into implementation tasks.
+              Clarise can now turn this plan into board-ready tasks.
             </p>
           </div>
           <button
@@ -883,7 +923,7 @@ function TaskProposalPanel({
                 className="inline-flex items-center gap-2 rounded-md border bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <CheckCircle2 className="h-4 w-4" />
-                {pending === "task-create" ? "Creating..." : "Create tasks"}
+                {pending === "task-create" ? "Creating..." : "Create tasks and open board"}
               </button>
               <button
                 onClick={onRegenerate}
@@ -922,6 +962,17 @@ function TaskProposalPanel({
                 Assistant remains a separate action.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  href={taskBoardHref(
+                    repoSlug,
+                    metadataString(proposal?.proposal, "source_milestone"),
+                    createdTasks,
+                  )}
+                  className="inline-flex items-center gap-2 rounded-md border bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:bg-foreground/90"
+                >
+                  Review task board
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
                 {createdTasks.map((key) => (
                   <Link
                     key={key}
@@ -1095,9 +1146,15 @@ function milestoneSummaries(workspace: SpecWorkspacePayload | null): SpecArtifac
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-function workflowIndex(milestone: SpecArtifact | null, linked: LinkedArtifacts): number {
+function workflowIndex(
+  milestone: SpecArtifact | null,
+  linked: LinkedArtifacts,
+  proposal: TaskProposalPayload | null,
+): number {
   if (!milestone) return 0;
-  if (milestone.status === "approved") return 4;
+  const createdTasks = proposal?.createdTasks ?? metadataList(proposal?.proposal, "created_tasks");
+  if (createdTasks.length > 0) return STEPS.length;
+  if (milestone.status === "approved") return 5;
   if (milestone.status === "plan_ready" || milestone.status === "ready_for_approval" || linked.plan) {
     return 4;
   }
@@ -1106,8 +1163,8 @@ function workflowIndex(milestone: SpecArtifact | null, linked: LinkedArtifacts):
   return 1;
 }
 
-function metadataString(artifact: SpecArtifact, key: string): string {
-  const value = artifact.metadata[key];
+function metadataString(artifact: SpecArtifact | undefined, key: string): string {
+  const value = artifact?.metadata[key];
   return typeof value === "string" ? value : "";
 }
 
@@ -1128,4 +1185,12 @@ function previewBody(body: string): string {
     .filter((line) => !line.startsWith("# "))
     .join("\n")
     .trim();
+}
+
+function taskBoardHref(repoSlug: string, sourceMilestone: string, createdTasks: string[]): string {
+  const params = new URLSearchParams();
+  if (sourceMilestone) params.set("sourceMilestone", sourceMilestone);
+  if (createdTasks.length > 0) params.set("created", createdTasks.join(","));
+  params.set("handoff", "1");
+  return `/r/${repoSlug}/tasks?${params.toString()}`;
 }
