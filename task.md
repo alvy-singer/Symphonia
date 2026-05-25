@@ -27,7 +27,7 @@
 - [x] m4: Theme toggle note
 
 ### Phase 4: Verification
-- [ ] Multi-viewport navigation test
-- [ ] Zero silent-click buttons
-- [ ] Zero jargon grep check
-- [ ] All tooltips verified
+- [x] Multi-viewport navigation test
+- [x] Zero silent-click buttons
+- [x] Zero jargon grep check
+- [x] All tooltips verified
