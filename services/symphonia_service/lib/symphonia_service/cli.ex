@@ -2,6 +2,8 @@ defmodule SymphoniaService.CLI do
   @moduledoc false
 
   def main(["serve" | args]) do
+    SymphoniaService.LocalEnv.load()
+
     {opts, _rest, _invalid} =
       OptionParser.parse(args,
         strict: [port: :integer, registry: :string],

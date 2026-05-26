@@ -16,7 +16,26 @@ defmodule SymphoniaService.GitHub.DeviceAuth do
   end
 
   def public_connection do
-    TokenStore.public_connection()
+    public =
+      case TokenStore.public_connection() do
+        %{"connected" => false} = connection ->
+          if enabled?() and env_token_present?() do
+            %{
+              connection
+              | "connected" => true
+            }
+            |> Map.put("user", %{"login" => "Environment token"})
+            |> Map.put("connectedAt", nil)
+            |> Map.put("tokenSource", env_token_source())
+          else
+            connection
+          end
+
+        connection ->
+          connection
+      end
+
+    public
     |> Map.put("deviceFallbackEnabled", enabled?())
   end
 
@@ -63,6 +82,16 @@ defmodule SymphoniaService.GitHub.DeviceAuth do
   def user_token! do
     ensure_enabled!()
 
+    case env_token() do
+      token when is_binary(token) ->
+        token
+
+      nil ->
+        stored_user_token!()
+    end
+  end
+
+  defp stored_user_token! do
     case TokenStore.load() do
       {:ok, connection} ->
         token = Map.fetch!(connection, "token")
@@ -74,7 +103,28 @@ defmodule SymphoniaService.GitHub.DeviceAuth do
         end
 
       :none ->
-        raise ArgumentError, "Connect GitHub with device flow for local testing."
+        raise ArgumentError,
+              "Connect GitHub with device flow for local testing or set GITHUB_TOKEN."
+    end
+  end
+
+  defp env_token_present?, do: not is_nil(env_token())
+
+  defp env_token do
+    ["GITHUB_TOKEN", "GH_TOKEN"]
+    |> Enum.find_value(fn key ->
+      case System.get_env(key) do
+        value when is_binary(value) and value != "" -> value
+        _ -> nil
+      end
+    end)
+  end
+
+  defp env_token_source do
+    cond do
+      present?(System.get_env("GITHUB_TOKEN")) -> "env:GITHUB_TOKEN"
+      present?(System.get_env("GH_TOKEN")) -> "env:GH_TOKEN"
+      true -> nil
     end
   end
 
@@ -178,6 +228,8 @@ defmodule SymphoniaService.GitHub.DeviceAuth do
       _ -> raise ArgumentError, "Set SYMPHONIA_GITHUB_CLIENT_SECRET to refresh GitHub access."
     end
   end
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
   defp device_flow_error("expired_token"), do: "GitHub authorization expired. Start again."
   defp device_flow_error("access_denied"), do: "GitHub authorization was denied."

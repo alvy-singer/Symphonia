@@ -46,10 +46,10 @@ defmodule SymphoniaService.GitHub.Auth do
   def token_for_repository(owner, repo) do
     case InstallationStore.find_repository(owner, repo) do
       %{"installationId" => installation_id} ->
-        InstallationToken.token_for_installation!(installation_id)
+        installation_token_or_fallback!(installation_id)
 
       %{"installation_id" => installation_id} ->
-        InstallationToken.token_for_installation!(installation_id)
+        installation_token_or_fallback!(installation_id)
 
       _ ->
         if DeviceAuth.enabled?() do
@@ -58,6 +58,17 @@ defmodule SymphoniaService.GitHub.Auth do
           raise ArgumentError, @install_error
         end
     end
+  end
+
+  defp installation_token_or_fallback!(installation_id) do
+    InstallationToken.token_for_installation!(installation_id)
+  rescue
+    error ->
+      if DeviceAuth.enabled?() do
+        DeviceAuth.user_token!()
+      else
+        reraise error, __STACKTRACE__
+      end
   end
 
   defp auth_mode(true, _device_connected?), do: "app_installation"

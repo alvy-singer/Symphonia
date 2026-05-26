@@ -1,7 +1,10 @@
 node_modules
 .next
 out
+.env
 .env*.local
+*.pem
+.symphonia/
 *.log
 tsconfig.tsbuildinfo
 services/symphonia_service/_build

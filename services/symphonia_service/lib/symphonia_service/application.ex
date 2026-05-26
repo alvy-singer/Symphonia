@@ -5,6 +5,8 @@ defmodule SymphoniaService.Application do
 
   @impl true
   def start(_type, _args) do
+    SymphoniaService.LocalEnv.load()
+
     registry_path = SymphoniaService.default_registry_path()
 
     service_port = System.get_env("SYMPHONIA_SERVICE_PORT")
