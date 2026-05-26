@@ -6,7 +6,9 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
   `priv/codex_app_server_schema`.
   """
 
-  @default_timeout_ms 900_000
+  @default_startup_timeout_ms 20_000
+  @default_turn_timeout_ms 900_000
+  @startup_timeout_message "Codex App Server did not respond during startup."
   @managed_standalone_relative_path Path.join([
                                       ".codex",
                                       "packages",
@@ -67,12 +69,8 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
         :ok
 
       true ->
-        bin = daemon_bin!(opts)
-
-        case System.cmd(bin, ["app-server", "daemon", "start"], stderr_to_stdout: true) do
-          {_output, 0} -> :ok
-          {output, _status} -> raise ArgumentError, clean_daemon_output(output)
-        end
+        daemon_bin!(opts)
+        :ok
     end
   end
 
@@ -84,7 +82,9 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
 
     try do
       events = []
+      notify_step(opts, "Starting Codex App Server")
       {_result, events} = initialize!(port, events, opts)
+      notify_step(opts, "Starting Codex thread")
 
       {thread_id, events} =
         case Keyword.get(opts, :thread_id) do
@@ -95,7 +95,11 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
             start_thread!(port, workspace_path, events, opts)
         end
 
+      notify_thread_id(opts, thread_id)
+      notify_step(opts, "Starting Codex turn")
       {turn_id, events} = start_turn!(port, thread_id, workspace_path, prompt, events, opts)
+      notify_turn_id(opts, turn_id)
+      notify_step(opts, "Codex is working")
       {events, completed} = wait_for_turn_completed(port, thread_id, turn_id, events, opts)
 
       {:ok,
@@ -195,11 +199,11 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
   defp request!(port, method, params, events, opts) do
     id = next_request_id()
     send_request(port, id, method, params)
-    wait_for_response(port, id, events, opts)
+    wait_for_response(port, id, events, startup_timeout_ms(opts), @startup_timeout_message)
   end
 
-  defp wait_for_response(port, id, events, opts) do
-    {message, events} = receive_message(port, events, opts)
+  defp wait_for_response(port, id, events, timeout_ms, timeout_message) do
+    {message, events} = receive_message(port, events, timeout_ms, timeout_message)
 
     cond do
       message["id"] == id and is_map(message["result"]) ->
@@ -209,12 +213,18 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
         throw({:app_server_error, jsonrpc_error(message["error"]), events})
 
       true ->
-        wait_for_response(port, id, events, opts)
+        wait_for_response(port, id, events, timeout_ms, timeout_message)
     end
   end
 
   defp wait_for_turn_completed(port, thread_id, turn_id, events, opts) do
-    {message, events} = receive_message(port, events, opts)
+    {message, events} =
+      receive_message(
+        port,
+        events,
+        turn_timeout_ms(opts),
+        "Codex App Server did not complete before the run timed out."
+      )
 
     case message do
       %{"method" => "turn/completed", "params" => params} ->
@@ -239,7 +249,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
     end
   end
 
-  defp receive_message(port, events, opts) do
+  defp receive_message(port, events, timeout_ms, timeout_message) do
     receive do
       {^port, {:data, data}} ->
         data
@@ -249,7 +259,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
           {message, append_event(acc_events, message)}
         end)
         |> case do
-          {nil, acc_events} -> receive_message(port, acc_events, opts)
+          {nil, acc_events} -> receive_message(port, acc_events, timeout_ms, timeout_message)
           {message, acc_events} -> {message, acc_events}
         end
 
@@ -258,11 +268,8 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
           {:app_server_error, "Codex App Server process exited with status #{status}.", events}
         )
     after
-      timeout_ms(opts) ->
-        throw(
-          {:app_server_error, "Codex App Server did not complete before the run timed out.",
-           events}
-        )
+      timeout_ms ->
+        throw({:app_server_error, timeout_message, events})
     end
   rescue
     error -> throw({:app_server_error, Exception.message(error), events})
@@ -311,7 +318,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
         {command, split_args(System.get_env("SYMPHONIA_CODEX_APP_SERVER_ARGS") || "")}
 
       true ->
-        {daemon_bin!(opts), ["app-server", "proxy"]}
+        {daemon_bin!(opts), ["app-server", "--listen", "stdio://"]}
     end
   end
 
@@ -444,19 +451,46 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
     end
   end
 
-  defp timeout_ms(opts) do
-    case Keyword.get(opts, :timeout_ms) || System.get_env("SYMPHONIA_CODEX_TIMEOUT_MS") do
+  defp startup_timeout_ms(opts) do
+    timeout_value(
+      Keyword.get(opts, :startup_timeout_ms) ||
+        System.get_env("SYMPHONIA_CODEX_STARTUP_TIMEOUT_MS") ||
+        Keyword.get(opts, :timeout_ms),
+      @default_startup_timeout_ms
+    )
+  end
+
+  defp turn_timeout_ms(opts) do
+    timeout_value(
+      Keyword.get(opts, :timeout_ms) || System.get_env("SYMPHONIA_CODEX_TIMEOUT_MS"),
+      @default_turn_timeout_ms
+    )
+  end
+
+  defp timeout_value(value, default) do
+    case value do
       value when is_integer(value) and value > 0 ->
         value
 
       value when is_binary(value) ->
         case Integer.parse(value) do
           {int, ""} when int > 0 -> int
-          _ -> @default_timeout_ms
+          _ -> default
         end
 
       _ ->
-        @default_timeout_ms
+        default
+    end
+  end
+
+  defp notify_step(opts, step), do: notify(opts, :on_step, step)
+  defp notify_thread_id(opts, thread_id), do: notify(opts, :on_thread_id, thread_id)
+  defp notify_turn_id(opts, turn_id), do: notify(opts, :on_turn_id, turn_id)
+
+  defp notify(opts, key, value) do
+    case Keyword.get(opts, key) do
+      fun when is_function(fun, 1) -> fun.(value)
+      _ -> :ok
     end
   end
 
@@ -471,26 +505,6 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
   defp truthy?(_), do: false
   defp blank?(value), do: is_nil(value) or (is_binary(value) and String.trim(value) == "")
   defp now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
-
-  defp clean_output(output) do
-    output
-    |> to_string()
-    |> String.trim()
-    |> case do
-      "" -> "Codex App Server daemon could not start."
-      message -> message
-    end
-  end
-
-  defp clean_daemon_output(output) do
-    output = to_string(output)
-
-    if String.contains?(output, "managed standalone Codex install not found") do
-      @setup_blocker_message
-    else
-      clean_output(output)
-    end
-  end
 
   defp close_port(port) do
     Port.close(port)

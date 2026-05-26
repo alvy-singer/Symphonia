@@ -276,6 +276,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
   defp public_failure_reason?("The Coding Assistant can't start" <> _rest), do: true
   defp public_failure_reason?("The Coding Assistant did not produce" <> _rest), do: true
   defp public_failure_reason?("The Coding Assistant could not finish" <> _rest), do: true
+  defp public_failure_reason?("Codex App Server did not respond" <> _rest), do: true
   defp public_failure_reason?(reason), do: AppServerClient.setup_blocker?(reason)
 
   defp paused_reason_for(reason) do

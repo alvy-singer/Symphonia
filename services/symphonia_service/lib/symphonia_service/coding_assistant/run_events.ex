@@ -21,7 +21,11 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
 
   @display_steps %{
     "Preparing repository" => "Preparing workspace",
-    "Preparing Codex App Server thread" => "Starting Codex",
+    "Starting Codex App Server" => "Starting Codex App Server",
+    "Preparing Codex App Server thread" => "Starting Codex thread",
+    "Starting Codex thread" => "Starting Codex thread",
+    "Starting Codex turn" => "Starting Codex turn",
+    "Codex is working" => "Codex is working",
     "Running Coding Assistant" => "Starting Codex",
     "Detecting changed files" => "Checking changes",
     "Creating branch" => "Checking changes",
@@ -66,6 +70,10 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
   def display_message(%{"state" => "running"} = run) do
     case display_step(run) do
       "Preparing workspace" -> "Codex is preparing a clean workspace for this task."
+      "Starting Codex App Server" -> "Symphonia is starting Codex App Server."
+      "Starting Codex thread" -> "Symphonia is preparing the Codex thread for this task."
+      "Starting Codex turn" -> "Symphonia is starting the Codex turn."
+      "Codex is working" -> "Codex is working from the task brief."
       "Starting Codex" -> "Codex is working from the task brief."
       "Checking changes" -> "Codex finished its turn and Symphonia is checking the changed files."
       "Writing handoff" -> "Symphonia is writing a review handoff."

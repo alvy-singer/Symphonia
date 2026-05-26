@@ -5,12 +5,15 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
 
   @behaviour SymphoniaService.CodingAssistant.Provider
 
+  alias SymphoniaService.TaskStore
+
   alias SymphoniaService.CodingAssistant.{
     AppServerClient,
     BranchManager,
     ChangeDetector,
     CuratedSummary,
     HandoffBuilder,
+    RunEvents,
     RunStore
   }
 
@@ -42,10 +45,10 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
             "review_branch" => context.head_branch
           })
 
-          RunStore.mark_step(run, "Preparing Codex App Server thread")
           prompt = build_prompt(repository, task, context, params)
 
-          with {:ok, output} <- invoke_app_server(run, context.repo_path, prompt),
+          with {:ok, output} <-
+                 invoke_app_server(repository, task["key"], run, context.repo_path, prompt),
                {:ok, changes} <- detect_and_clean_changes(run, context.repo_path),
                :ok <- ensure_committable_changes(changes),
                {:ok, summary_path} <- write_summary(run, context.repo_path, task, changes, output),
@@ -77,8 +80,19 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
     :ok
   end
 
-  defp invoke_app_server(run, repo_path, prompt) do
-    opts = app_server_opts(run, %{})
+  defp invoke_app_server(repository, task_key, run, repo_path, prompt) do
+    opts =
+      run
+      |> app_server_opts(%{})
+      |> Keyword.put(:on_step, &mark_run_step(repository, task_key, run, &1))
+      |> Keyword.put(
+        :on_thread_id,
+        &update_run_metadata(repository, task_key, run, %{"codex_thread_id" => &1})
+      )
+      |> Keyword.put(
+        :on_turn_id,
+        &update_run_metadata(repository, task_key, run, %{"turn_id" => &1})
+      )
 
     case AppServerClient.run_turn(repo_path, prompt, opts) do
       {:ok, output} ->
@@ -112,6 +126,52 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
       command: System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND"),
       args: app_server_args()
     ]
+  end
+
+  defp mark_run_step(repository, task_key, run, step) do
+    run
+    |> RunStore.mark_step(step)
+    |> sync_task_run(repository, task_key)
+
+    :ok
+  end
+
+  defp update_run_metadata(repository, task_key, run, attrs) do
+    run
+    |> RunStore.update_metadata(attrs)
+    |> sync_task_run(repository, task_key)
+
+    :ok
+  end
+
+  defp sync_task_run(run, repository, task_key) do
+    TaskStore.patch_task(repository, task_key, %{
+      "frontmatter" => %{
+        "assistant" => run["provider"] || "coding_assistant",
+        "run" => run_frontmatter(run)
+      }
+    })
+  end
+
+  defp run_frontmatter(run) do
+    %{
+      "id" => run["id"],
+      "state" => run["state"],
+      "current_step" => run["current_step"],
+      "message" => RunEvents.public_message(run),
+      "display_step" => RunEvents.display_step(run),
+      "display_message" => RunEvents.display_message(run),
+      "workspace_path" => run["workspace_path"],
+      "codex_thread_id" => run["codex_thread_id"],
+      "turn_id" => run["turn_id"],
+      "eligibility_reason" => run["eligibility_reason"],
+      "review_branch" => run["review_branch"],
+      "curated_summary_path" => run["curated_summary_path"],
+      "started_at" => run["started_at"],
+      "completed_at" => run["completed_at"]
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
   end
 
   defp detect_and_clean_changes(run, repo_path) do

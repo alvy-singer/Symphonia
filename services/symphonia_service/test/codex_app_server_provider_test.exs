@@ -37,6 +37,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     workspaces_root = Path.join(root, "workspaces")
     fake_app_server = Path.join(root, "fake-app-server.js")
     requests_file = Path.join(root, "app-server-requests.json")
+    args_file = Path.join(root, "app-server-args.json")
 
     write_fake_app_server!(fake_app_server)
 
@@ -46,10 +47,13 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     previous_workspaces_root = System.get_env("SYMPHONIA_WORKSPACES_ROOT")
     previous_skip_daemon = System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")
     previous_app_server_command = System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND")
+    previous_app_server_args = System.get_env("SYMPHONIA_CODEX_APP_SERVER_ARGS")
     previous_standalone_bin = System.get_env("SYMPHONIA_CODEX_APP_SERVER_STANDALONE_BIN")
     previous_codex_bin = System.get_env("SYMPHONIA_CODEX_BIN")
     previous_app_server_bin = System.get_env("SYMPHONIA_CODEX_APP_SERVER_BIN")
+    previous_startup_timeout = System.get_env("SYMPHONIA_CODEX_STARTUP_TIMEOUT_MS")
     previous_requests_file = System.get_env("FAKE_APP_SERVER_REQUESTS_FILE")
+    previous_args_file = System.get_env("FAKE_APP_SERVER_ARGS_FILE")
     previous_fake_mode = System.get_env("FAKE_APP_SERVER_MODE")
     previous_output_suffix = System.get_env("FAKE_APP_SERVER_OUTPUT_SUFFIX")
 
@@ -60,6 +64,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     System.put_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON", "true")
     System.put_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND", fake_app_server)
     System.put_env("FAKE_APP_SERVER_REQUESTS_FILE", requests_file)
+    System.put_env("FAKE_APP_SERVER_ARGS_FILE", args_file)
 
     Application.put_env(:symphonia_service, :github_client, StubClient)
     Application.put_env(:symphonia_service, :github_home, github_home)
@@ -71,10 +76,13 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
       restore_env("SYMPHONIA_WORKSPACES_ROOT", previous_workspaces_root)
       restore_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON", previous_skip_daemon)
       restore_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND", previous_app_server_command)
+      restore_env("SYMPHONIA_CODEX_APP_SERVER_ARGS", previous_app_server_args)
       restore_env("SYMPHONIA_CODEX_APP_SERVER_STANDALONE_BIN", previous_standalone_bin)
       restore_env("SYMPHONIA_CODEX_BIN", previous_codex_bin)
       restore_env("SYMPHONIA_CODEX_APP_SERVER_BIN", previous_app_server_bin)
+      restore_env("SYMPHONIA_CODEX_STARTUP_TIMEOUT_MS", previous_startup_timeout)
       restore_env("FAKE_APP_SERVER_REQUESTS_FILE", previous_requests_file)
+      restore_env("FAKE_APP_SERVER_ARGS_FILE", previous_args_file)
       restore_env("FAKE_APP_SERVER_MODE", previous_fake_mode)
       restore_env("FAKE_APP_SERVER_OUTPUT_SUFFIX", previous_output_suffix)
       Application.delete_env(:symphonia_service, :github_client)
@@ -123,6 +131,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     %{
       registry_path: registry_path,
       fake_app_server: fake_app_server,
+      args_file: args_file,
       remote_path: remote_path,
       repository: repository,
       requests_file: requests_file,
@@ -313,6 +322,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     retried_task = wait_for_task_status(repository, task["key"], "in_review")
 
     assert retried_run["provider"] == "codex_app_server"
+
     assert retried_task["handoff"]["headBranch"] ==
              "symphonia/task/#{String.downcase(task["key"])}"
   end
@@ -335,6 +345,68 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     requests = JSON.decode!(File.read!(requests_file))
     assert Enum.any?(requests, &(&1["method"] == "thread/resume"))
     refute Enum.any?(requests, &(&1["method"] == "thread/start"))
+  end
+
+  test "client defaults to direct stdio app-server transport", %{
+    args_file: args_file,
+    fake_app_server: fake_app_server,
+    workspaces_root: workspaces_root
+  } do
+    System.delete_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND")
+    System.delete_env("SYMPHONIA_CODEX_APP_SERVER_ARGS")
+    System.put_env("SYMPHONIA_CODEX_APP_SERVER_BIN", fake_app_server)
+
+    workspace_path = Path.join(workspaces_root, "direct-stdio-default")
+    File.mkdir_p!(workspace_path)
+
+    assert {:ok, output} = AppServerClient.run_turn(workspace_path, "Use default transport.")
+    assert output["turn_id"] == "turn-fake"
+    assert JSON.decode!(File.read!(args_file)) == ["app-server", "--listen", "stdio://"]
+  end
+
+  test "client returns a bounded startup timeout when app-server does not initialize", %{
+    workspaces_root: workspaces_root
+  } do
+    System.put_env("FAKE_APP_SERVER_MODE", "silent_initialize")
+    workspace_path = Path.join(workspaces_root, "silent-initialize")
+    File.mkdir_p!(workspace_path)
+
+    assert {:error, "Codex App Server did not respond during startup.", []} =
+             AppServerClient.run_turn(workspace_path, "Exercise startup timeout.",
+               startup_timeout_ms: 250
+             )
+  end
+
+  test "run metadata is persisted while app-server turn is still active", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    System.put_env("FAKE_APP_SERVER_MODE", "delayed_complete")
+
+    task =
+      TaskStore.create_task(registry_path, repository, %{
+        "title" => "Visible progress Codex task",
+        "body" => "Create a small app-server output file."
+      })
+
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+
+    run =
+      wait_for_run_matching(runs_root, result["run"]["id"], fn run ->
+        run["state"] == "running" and run["current_step"] == "Codex is working" and
+          run["codex_thread_id"] == "thread-fake" and run["turn_id"] == "turn-fake"
+      end)
+
+    assert run["current_step"] == "Codex is working"
+
+    task = TaskStore.get_task(repository, task["key"])
+    assert task["run"]["displayStep"] == "Codex is working"
+    assert task["run"]["codexThreadId"] == "thread-fake"
+    assert task["run"]["turnId"] == "turn-fake"
+
+    wait_for_run(runs_root, result["run"]["id"], "completed")
+    wait_for_task_status(repository, task["key"], "in_review")
   end
 
   test "client returns bounded errors for failed, interrupted, and malformed turns", %{
@@ -362,6 +434,31 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
         assert reason =~ expected
       end
     end
+  end
+
+  test "startup timeout failure is surfaced as the paused task explanation", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    System.put_env("FAKE_APP_SERVER_MODE", "silent_initialize")
+    System.put_env("SYMPHONIA_CODEX_STARTUP_TIMEOUT_MS", "250")
+
+    task =
+      TaskStore.create_task(registry_path, repository, %{
+        "title" => "Startup timeout task",
+        "body" => "Create a small app-server output file."
+      })
+
+    result = CodingAssistant.start_run(registry_path, repository, task["key"])
+    run = wait_for_run(runs_root, result["run"]["id"], "failed")
+    task = wait_for_task_status(repository, task["key"], "paused")
+
+    assert run["error"] == "Codex App Server did not respond during startup."
+    assert run["message"] == "Codex App Server did not respond during startup."
+    assert run["provider_output"]["app_server_events"] == []
+    assert task["pausedReason"] == "run_failed"
+    assert task["pausedExplanation"] == "Codex App Server did not respond during startup."
   end
 
   test "persistent workspace is reused after a failed run retry", %{
@@ -525,6 +622,21 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     end
   end
 
+  defp wait_for_run_matching(runs_root, run_id, predicate, attempts \\ 80) do
+    run = RunStore.get(run_id, root: runs_root)
+
+    if run && predicate.(run) do
+      run
+    else
+      if attempts <= 0 do
+        flunk("run #{run_id} did not match predicate; last run: #{inspect(run)}")
+      end
+
+      Process.sleep(50)
+      wait_for_run_matching(runs_root, run_id, predicate, attempts - 1)
+    end
+  end
+
   defp wait_for_task_status(repository, task_key, status, attempts \\ 80) do
     task = TaskStore.get_task(repository, task_key)
 
@@ -548,9 +660,14 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     const fs = require("fs");
     const readline = require("readline");
     const requestsFile = process.env.FAKE_APP_SERVER_REQUESTS_FILE;
+    const argsFile = process.env.FAKE_APP_SERVER_ARGS_FILE;
     const mode = process.env.FAKE_APP_SERVER_MODE || "success";
     const outputSuffix = process.env.FAKE_APP_SERVER_OUTPUT_SUFFIX || "";
     const requests = [];
+
+    if (argsFile) {
+      fs.writeFileSync(argsFile, JSON.stringify(process.argv.slice(2)));
+    }
 
     function save() {
       fs.writeFileSync(requestsFile, JSON.stringify(requests, null, 2));
@@ -566,6 +683,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
       save();
 
       if (message.method === "initialize") {
+        if (mode === "silent_initialize") {
+          return;
+        }
         send({ jsonrpc: "2.0", id: message.id, result: { codexHome: "/tmp/codex-home", platformFamily: "unix", platformOs: "macos", userAgent: "fake" } });
       } else if (message.method === "thread/start") {
         send({ jsonrpc: "2.0", id: message.id, result: { thread: { id: "thread-fake" }, cwd: message.params.cwd, approvalPolicy: "never", approvalsReviewer: "auto_review", model: "fake", modelProvider: "fake", sandbox: "workspace-write" } });
@@ -588,6 +708,10 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
           send({ jsonrpc: "2.0", method: "turn/completed", params: { threadId, turn: { id: "turn-fake", status: "failed", error: "Fake turn failure." } } });
         } else if (mode === "interrupted") {
           send({ jsonrpc: "2.0", method: "turn/completed", params: { threadId, turn: { id: "turn-fake", status: "interrupted" } } });
+        } else if (mode === "delayed_complete") {
+          setTimeout(() => {
+            send({ jsonrpc: "2.0", method: "turn/completed", params: { threadId, turn: { id: "turn-fake", status: "completed" } } });
+          }, 500);
         } else {
           send({ jsonrpc: "2.0", method: "turn/completed", params: { threadId, turn: { id: "turn-fake", status: "completed" } } });
         }

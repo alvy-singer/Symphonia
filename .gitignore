@@ -11,4 +11,4 @@ services/symphonia_service/_build
 services/symphonia_service/.elixir_ls
 .DS_Store
 .agents
-remotion
+remotion/
