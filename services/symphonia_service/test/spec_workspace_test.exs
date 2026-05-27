@@ -111,6 +111,51 @@ defmodule SymphoniaService.SpecWorkspaceTest do
     assert decision["body"] =~ "# Decision 002 — Next decision"
   end
 
+  test "creates private task brief artifacts without task board side effects", %{repository: repository} do
+    SpecWorkspace.initialize(repository)
+
+    task_brief =
+      SpecWorkspace.create_task_brief(repository, %{
+        "title" => "Set up WORKFLOW.md",
+        "body" => "# Set up WORKFLOW.md\n\n## Goal\n\nPrepare repository rules privately.",
+        "private" => true,
+        "source" => "clarise_chat"
+      })
+
+    assert task_brief["type"] == "task_brief"
+    assert task_brief["id"] == "task-001"
+    assert task_brief["path"] == "symphonia/task-briefs/task-001.md"
+    assert task_brief["metadata"]["private"] == true
+    assert task_brief["metadata"]["source"] == "clarise_chat"
+    refute File.exists?(Path.join(repository["path"], "symphonia/tasks/SYM-1.md"))
+  end
+
+  test "creates requirement and plan artifacts with milestone metadata", %{repository: repository} do
+    SpecWorkspace.initialize(repository)
+    milestone = SpecWorkspace.create_milestone(repository, %{"title" => "Planning parent"})
+
+    requirement =
+      SpecWorkspace.create_requirement(repository, %{
+        "title" => "Private requirement",
+        "body" => "# Requirement\n\n## Requirement\n\nKeep project memory durable.",
+        "related_milestone" => milestone["id"],
+        "private" => true
+      })
+
+    plan =
+      SpecWorkspace.create_plan(repository, %{
+        "title" => "Private plan",
+        "body" => "# Plan\n\n## Plan\n\nCreate docs first.",
+        "related_milestone" => milestone["id"],
+        "private" => true
+      })
+
+    assert requirement["id"] == "requirement-001"
+    assert requirement["metadata"]["related_milestone"] == milestone["id"]
+    assert plan["id"] == "plan-001"
+    assert plan["metadata"]["related_milestone"] == milestone["id"]
+  end
+
   test "lists, reads, and updates artifacts while preserving metadata", %{repository: repository} do
     SpecWorkspace.initialize(repository)
     artifact = SpecWorkspace.create_milestone(repository, %{"title" => "Editable milestone"})

@@ -11,6 +11,7 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Users,
   ArrowLeft,
   BookOpen,
@@ -158,6 +159,14 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
 
         <nav className="space-y-0.5">
           <NavLink
+            to={base}
+            label="Clarise"
+            icon={<Sparkles className="h-3.5 w-3.5" />}
+            active={pathname === base}
+            onNavigate={handleNav}
+            title="Start with the Clarise repo chat"
+          />
+          <NavLink
             to={`${base}/inbox`}
             label="Inbox"
             icon={<Inbox className="h-3.5 w-3.5" />}
@@ -177,7 +186,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
             to={`${base}/workspace`}
             label="Planning"
             icon={<BookOpen className="h-3.5 w-3.5" />}
-            active={pathname === `${base}/workspace`}
+            active={pathname === `${base}/workspace` || pathname.startsWith(`${base}/workspace/`)}
             onNavigate={handleNav}
             title="Use Clarise to break down goals into tasks"
           />
@@ -238,7 +247,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
               return (
                 <Link
                   key={t.key}
-                  href={`/r/${t.key.toLowerCase()}/tasks`}
+                  href={`/r/${t.key.toLowerCase()}`}
                   onClick={handleNav}
                   title={`Open ${t.name}`}
                   className={cn(

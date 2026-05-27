@@ -1,4 +1,4 @@
-import { ClariseMilestoneLoop } from "@/components/clarise-milestone-loop";
+import { SpecWorkspaceIndex } from "@/components/spec-workspace-index";
 
 export default async function WorkspacePage({
   params,
@@ -6,5 +6,5 @@ export default async function WorkspacePage({
   params: Promise<{ repoKey: string }>;
 }) {
   const { repoKey } = await params;
-  return <ClariseMilestoneLoop repoKey={repoKey.toUpperCase()} />;
+  return <SpecWorkspaceIndex repoKey={repoKey.toUpperCase()} />;
 }

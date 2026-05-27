@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Sparkles, Send, X, FilePlus2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATEGORY_SINGULAR, type DocCategory } from "@/lib/docs-store";
@@ -93,11 +93,13 @@ export function Clarise({ repoKey }: { repoKey: string }) {
   const newTask = useNewTask();
   const { openSignal } = useContext(SignalCtx);
   const router = useRouter();
+  const pathname = usePathname();
+  const isRepoHome = pathname === `/r/${repoKey.toLowerCase()}`;
 
-  // Open when the command palette pings.
+  // Route existing Clarise entry points into the full-page private workspace chat.
   useEffect(() => {
-    if (openSignal > 0) setOpen(true);
-  }, [openSignal]);
+    if (openSignal > 0) router.push(`/r/${repoKey.toLowerCase()}`);
+  }, [openSignal, repoKey, router]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
@@ -164,10 +166,14 @@ export function Clarise({ repoKey }: { repoKey: string }) {
     setOpen(false);
   };
 
+  if (!open && isRepoHome) {
+    return null;
+  }
+
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => router.push(`/r/${repoKey.toLowerCase()}`)}
         aria-label="Open Clarise"
         className="fixed bottom-4 right-4 z-30 inline-flex items-center gap-2 rounded-full border bg-card px-3.5 py-2 text-xs font-medium shadow-lg hover:bg-accent transition-colors"
       >

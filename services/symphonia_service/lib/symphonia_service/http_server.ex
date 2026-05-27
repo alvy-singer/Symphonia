@@ -312,9 +312,24 @@ defmodule SymphoniaService.HTTPServer do
         artifact = SpecWorkspace.create_milestone(repository, decode_json(body))
         {201, %{"artifact" => artifact}}
 
+      ["api", "repositories", repo, "spec-workspace", "requirements"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        artifact = SpecWorkspace.create_requirement(repository, decode_json(body))
+        {201, %{"artifact" => artifact}}
+
+      ["api", "repositories", repo, "spec-workspace", "plans"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        artifact = SpecWorkspace.create_plan(repository, decode_json(body))
+        {201, %{"artifact" => artifact}}
+
       ["api", "repositories", repo, "spec-workspace", "decisions"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         artifact = SpecWorkspace.create_decision(repository, decode_json(body))
+        {201, %{"artifact" => artifact}}
+
+      ["api", "repositories", repo, "spec-workspace", "task-briefs"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        artifact = SpecWorkspace.create_task_brief(repository, decode_json(body))
         {201, %{"artifact" => artifact}}
 
       ["api", "repositories", repo, "clarise", "milestones", "start"] ->

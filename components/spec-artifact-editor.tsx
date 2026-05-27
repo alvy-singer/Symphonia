@@ -27,9 +27,10 @@ const TYPE_LABELS: Record<SpecArtifactType, string> = {
   codebase_architecture: "Architecture",
   milestone: "Milestone",
   discussion: "Discussion",
-  requirements: "Requirements",
+  requirements: "Requirement",
   plan: "Plan",
   task_proposal: "Task proposal",
+  task_brief: "Task brief",
   decision: "Decision",
 };
 

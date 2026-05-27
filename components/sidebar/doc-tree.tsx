@@ -62,6 +62,7 @@ const SPEC_SECTION_ICONS: Record<string, typeof FileText> = {
   Requirements: ListChecks,
   Plans: ShieldCheck,
   "Task proposals": ListChecks,
+  "Task briefs": FileText,
   Decisions: Landmark,
 };
 
@@ -71,9 +72,10 @@ const SPEC_TYPE_LABELS: Record<SpecArtifactType, string> = {
   codebase_architecture: "Architecture",
   milestone: "Milestone",
   discussion: "Discussion",
-  requirements: "Requirements",
+  requirements: "Requirement",
   plan: "Plan",
   task_proposal: "Task proposal",
+  task_brief: "Task brief",
   decision: "Decision",
 };
 
@@ -267,10 +269,9 @@ export function DocTree({ repoKey, onNew }: Props) {
       })}
 
       <SidebarLink
-        href="#"
-        onClickAction={() => onNew("doc")}
+        href={`/r/${slug}`}
         icon={<Sparkles className="h-3.5 w-3.5" />}
-        label="Ask Clarise to draft"
+        label="Open Clarise"
         muted
       />
     </div>

@@ -15,6 +15,7 @@ defmodule SymphoniaService.SpecWorkspace.Store do
     "symphonia/requirements",
     "symphonia/plans",
     "symphonia/task-proposals",
+    "symphonia/task-briefs",
     "symphonia/decisions",
     "symphonia/tasks",
     "symphonia/reviews",
@@ -30,9 +31,10 @@ defmodule SymphoniaService.SpecWorkspace.Store do
   @collections %{
     "milestone" => {"milestone", "symphonia/milestones"},
     "discussion" => {"discussion", "symphonia/discussions"},
-    "requirements" => {"requirements", "symphonia/requirements"},
+    "requirements" => {"requirement", "symphonia/requirements"},
     "plan" => {"plan", "symphonia/plans"},
     "task_proposal" => {"task-proposal", "symphonia/task-proposals"},
+    "task_brief" => {"task", "symphonia/task-briefs"},
     "decision" => {"decision", "symphonia/decisions"}
   }
 

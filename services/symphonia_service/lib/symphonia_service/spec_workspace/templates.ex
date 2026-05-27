@@ -9,9 +9,10 @@ defmodule SymphoniaService.SpecWorkspace.Templates do
     "codebase_architecture" => "Codebase architecture",
     "milestone" => "Untitled milestone",
     "discussion" => "Untitled discussion",
-    "requirements" => "Untitled requirements",
+    "requirements" => "Untitled requirement",
     "plan" => "Untitled plan",
     "task_proposal" => "Untitled task proposal",
+    "task_brief" => "Untitled task brief",
     "decision" => "Untitled decision"
   }
 
@@ -124,18 +125,18 @@ defmodule SymphoniaService.SpecWorkspace.Templates do
   end
 
   def body("requirements", id, attrs) do
-    title = string_attr(attrs, "title") || "Untitled requirements"
+    title = string_attr(attrs, "title") || "Untitled requirement"
 
     """
-    # Requirements #{suffix_number(id)} — #{title}
+    # Requirement #{suffix_number(id)} — #{title}
 
-    ## User needs
+    ## Requirement
 
-    ## Functional requirements
+    ## Validation criteria
 
     ## Constraints
 
-    ## Acceptance criteria
+    ## Related milestone
     """
   end
 
@@ -189,6 +190,26 @@ defmodule SymphoniaService.SpecWorkspace.Templates do
     ## Related artifacts
 
     - Proposal: #{id}
+    """
+  end
+
+  def body("task_brief", id, attrs) do
+    title = string_attr(attrs, "title") || "Untitled task brief"
+
+    """
+    # #{title}
+
+    ## Goal
+
+    ## Context
+
+    ## Acceptance criteria
+
+    ## Review expectations
+
+    ## Related artifacts
+
+    - Task brief: #{id}
     """
   end
 

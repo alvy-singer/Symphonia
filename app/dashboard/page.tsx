@@ -77,7 +77,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("github") === "installed") {
-      setNotice("GitHub connected. Pick a repository to open its workspace.");
+      setNotice("GitHub connected. Pick a repository to open Clarise.");
       window.history.replaceState({}, "", window.location.pathname);
     } else if (params.get("github") === "install-canceled") {
       setError("GitHub installation was canceled.");
@@ -177,6 +177,15 @@ export default function DashboardPage() {
     window.location.assign(connectHref);
   };
 
+  const openDashboardClarise = () => {
+    const repository = repositories[0];
+    if (!repository) {
+      setError("Open a repository first.");
+      return;
+    }
+    router.push(`/r/${repository.key.toLowerCase()}`);
+  };
+
   const confirmRemoval = async () => {
     if (!pendingRemoval) return;
     const repository = pendingRemoval;
@@ -224,7 +233,7 @@ export default function DashboardPage() {
         const exists = current.some((repo) => repo.key === openedRepository.key);
         return exists ? current : [...current, openedRepository];
       });
-      router.push(`/r/${openedRepository.key.toLowerCase()}/tasks`);
+      router.push(`/r/${openedRepository.key.toLowerCase()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open repository");
     } finally {
@@ -261,6 +270,14 @@ export default function DashboardPage() {
             <Github className="h-4 w-4" />
             Connect repo
           </button>
+          <button
+            onClick={openDashboardClarise}
+            title="Ask Clarise"
+            className="inline-grid h-9 w-9 place-items-center rounded-[8px] border bg-card text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            aria-label="Ask Clarise"
+          >
+            <Sparkles className="h-4 w-4" />
+          </button>
         </div>
       </header>
 
@@ -291,6 +308,13 @@ export default function DashboardPage() {
               >
                 Connect to GitHub
                 <ArrowRight className="h-4 w-4" />
+              </button>
+              <button
+                onClick={openDashboardClarise}
+                className="inline-flex h-10 items-center gap-2 rounded-[8px] border bg-card px-4 text-[15px] font-semibold text-foreground transition hover:bg-accent"
+              >
+                <Sparkles className="h-4 w-4" />
+                Ask Clarise
               </button>
               <span className="text-[13px] text-muted-foreground">{connectedCount} connected</span>
             </div>
@@ -432,7 +456,7 @@ function EmptyRepositoryState({
       </h3>
       <p className="mx-auto mt-3 max-w-md text-[15px] leading-6 text-muted-foreground">
         Connect GitHub to bring your repositories into Symphonia. Once a repo is
-        opened, the existing tasks, docs, reviews, and workspace pages take over.
+            opened, Clarise becomes the first stop and the workspace stays close by.
       </p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
         <button
@@ -523,7 +547,7 @@ function GitHubRepositoryCard({
 
       <div className="mt-4 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1 text-[13px] font-medium text-primary">
-          {opening ? "Opening workspace..." : "Open workspace"}
+          {opening ? "Opening Clarise..." : "Open Clarise"}
           <ArrowRight className="h-3.5 w-3.5" />
         </span>
         <div className="relative z-10 flex items-center gap-3">
@@ -569,7 +593,7 @@ function RepositoryCard({
   const workspace = repository.workspace;
   const files = workspace?.initialized ? "Ready" : "Missing";
   const rules = workspace?.workflow.exists ? "Ready" : "Missing";
-  const href = `/r/${repository.key.toLowerCase()}/tasks`;
+  const href = `/r/${repository.key.toLowerCase()}`;
 
   return (
     <div

@@ -21,6 +21,9 @@ defmodule SymphoniaService.SpecWorkspace do
 
   def sections(repository), do: Index.sections(repository)
   def create_milestone(repository, attrs \\ %{}), do: Milestones.create(repository, attrs)
+  def create_requirement(repository, attrs \\ %{}), do: Store.create_artifact(repository, "requirements", attrs)
+  def create_plan(repository, attrs \\ %{}), do: Store.create_artifact(repository, "plan", attrs)
   def create_decision(repository, attrs \\ %{}), do: Decisions.create(repository, attrs)
+  def create_task_brief(repository, attrs \\ %{}), do: Store.create_artifact(repository, "task_brief", attrs)
   def create_artifact(repository, type, id, attrs), do: Store.create_artifact(repository, type, id, attrs)
 end

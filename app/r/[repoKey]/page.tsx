@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { ClariseRepoHome } from "@/components/clarise-repo-home";
 
 export default async function RepoIndex({
   params,
@@ -6,5 +6,5 @@ export default async function RepoIndex({
   params: Promise<{ repoKey: string }>;
 }) {
   const { repoKey } = await params;
-  redirect(`/r/${repoKey}/tasks`);
+  return <ClariseRepoHome repoKey={repoKey.toUpperCase()} />;
 }

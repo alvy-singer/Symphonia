@@ -16,6 +16,7 @@ export type SpecArtifactType =
   | "requirements"
   | "plan"
   | "task_proposal"
+  | "task_brief"
   | "decision";
 
 export type SpecArtifactStatus =

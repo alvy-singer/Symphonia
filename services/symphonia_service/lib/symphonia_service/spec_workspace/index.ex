@@ -12,6 +12,7 @@ defmodule SymphoniaService.SpecWorkspace.Index do
     {"Requirements", ["requirements"]},
     {"Plans", ["plan"]},
     {"Task proposals", ["task_proposal"]},
+    {"Task briefs", ["task_brief"]},
     {"Decisions", ["decision"]}
   ]
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const SERVICE_URL = process.env.SYMPHONIA_SERVICE_URL ?? "http://127.0.0.1:4057";
+export const SERVICE_URL = process.env.SYMPHONIA_SERVICE_URL ?? "http://127.0.0.1:4057";
 
 export async function proxyToSymphoniaService(
   path: string,
@@ -35,4 +35,24 @@ export async function proxyToSymphoniaService(
 
 export async function jsonBody(request: Request): Promise<string> {
   return JSON.stringify(await request.json());
+}
+
+export async function serviceJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
+  const response = await fetch(`${SERVICE_URL}${path}`, {
+    ...init,
+    cache: "no-store",
+    headers,
+  });
+  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Symphonía service request failed.");
+  }
+
+  return payload;
 }

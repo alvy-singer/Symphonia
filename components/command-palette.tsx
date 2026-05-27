@@ -139,7 +139,7 @@ export function CommandPaletteProvider({
         hint: "Open repository",
         group: "Navigate",
         icon: <Folder className="h-3.5 w-3.5" />,
-        run: () => router.push(`/r/${slug(r.key)}/tasks`),
+        run: () => router.push(`/r/${slug(r.key)}`),
         keywords: r.key,
       });
     });
@@ -149,6 +149,15 @@ export function CommandPaletteProvider({
     if (repoForActions) {
       const s = slug(repoForActions);
       cmds.push(
+        {
+          id: "nav-clarise",
+          label: "Clarise",
+          hint: repoForActions,
+          group: "Navigate",
+          icon: <Sparkles className="h-3.5 w-3.5 text-violet-500" />,
+          run: () => router.push(`/r/${s}`),
+          keywords: "repo home chat planning",
+        },
         {
           id: "nav-tasks",
           label: "Tasks",
