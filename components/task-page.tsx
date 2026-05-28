@@ -220,6 +220,50 @@ async function requestTaskChanges(
   return { task: data.task, reviewNote: data.review_note as ReviewNote };
 }
 
+function parseRunProgress(message: MessageEvent): CodingAssistantRunEvent | null {
+  try {
+    const data = JSON.parse(message.data) as CodingAssistantRunEvent;
+    return {
+      ...data,
+      id: message.lastEventId || data.id,
+      event: "run-progress",
+      at: data.updatedAt,
+      label: data.displayStep,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function appendRunProgress(
+  events: CodingAssistantRunEvent[],
+  progress: CodingAssistantRunEvent,
+): CodingAssistantRunEvent[] {
+  if (progress.id && events.some((event) => event.id === progress.id)) return events;
+
+  return [
+    ...events,
+    {
+      id: progress.id,
+      event: "run-progress",
+      at: progress.updatedAt ?? progress.at,
+      label: progress.displayStep ?? progress.label,
+      runId: progress.runId,
+      taskKey: progress.taskKey,
+      state: progress.state,
+      displayStep: progress.displayStep,
+      displayMessage: progress.displayMessage,
+      reviewBranch: progress.reviewBranch,
+      curatedSummaryPath: progress.curatedSummaryPath,
+      updatedAt: progress.updatedAt,
+    },
+  ];
+}
+
+function isTerminalRunState(state?: string): boolean {
+  return state === "completed" || state === "failed" || state === "canceled";
+}
+
 type TaskAction =
   | {
       label: string;
@@ -302,6 +346,9 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     if (!task || !activeRunId) return;
 
     let cancelled = false;
+    let source: EventSource | null = null;
+    let interval: number | null = null;
+
     const refresh = async () => {
       try {
         const [updatedTask, updatedRun, updatedEvents] = await Promise.all([
@@ -327,11 +374,61 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       }
     };
 
-    const interval = window.setInterval(refresh, 2000);
-    void refresh();
+    const startPolling = () => {
+      if (interval != null || cancelled) return;
+      interval = window.setInterval(refresh, 2000);
+      void refresh();
+    };
+
+    if ("EventSource" in window) {
+      source = new EventSource(
+        `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+          task.key,
+        )}/runs/${encodeURIComponent(activeRunId)}/events`,
+      );
+
+      source.addEventListener("run-progress", (message) => {
+        if (cancelled) return;
+
+        const progress = parseRunProgress(message);
+        if (!progress) return;
+
+        setRunEvents((events) => appendRunProgress(events, progress));
+        setTask((current) => {
+          if (!current?.run || current.run.id !== activeRunId) return current;
+
+          return {
+            ...current,
+            run: {
+              ...current.run,
+              state: progress.state ?? current.run.state,
+              displayStep: progress.displayStep ?? current.run.displayStep,
+              displayMessage: progress.displayMessage ?? current.run.displayMessage,
+              reviewBranch: progress.reviewBranch ?? current.run.reviewBranch,
+              curatedSummaryPath:
+                progress.curatedSummaryPath ?? current.run.curatedSummaryPath,
+            },
+          };
+        });
+
+        if (isTerminalRunState(progress.state)) {
+          source?.close();
+          void refresh();
+        }
+      });
+
+      source.onerror = () => {
+        source?.close();
+        startPolling();
+      };
+    } else {
+      startPolling();
+    }
+
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      source?.close();
+      if (interval != null) window.clearInterval(interval);
     };
   }, [repoKey, task?.key, task?.run?.id, task?.run?.state]);
 

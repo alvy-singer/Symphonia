@@ -429,6 +429,35 @@ defmodule SymphoniaService.CodingAssistantTest do
     assert detail["run"]["state"] == "running"
     assert detail["run"]["currentStep"] == "Running Coding Assistant"
     assert detail["run"]["displayStep"] == "Starting Codex"
+    refute Map.has_key?(detail["run"], "workspacePath")
+    refute Map.has_key?(detail["run"], "codexThreadId")
+    refute Map.has_key?(detail["run"], "turnId")
+
+    {200, progress} =
+      http_json(
+        :get,
+        "http://127.0.0.1:#{port}/api/repositories/#{repository["key"]}/tasks/#{task["key"]}/runs/#{run_id}/events"
+      )
+
+    assert [%{"id" => first_event_id, "event" => "run-progress"} | _rest] = progress["events"]
+    assert Enum.all?(progress["events"], &Map.has_key?(&1, "displayStep"))
+    refute JSON.encode!(progress["events"]) =~ "workspacePath"
+    refute JSON.encode!(progress["events"]) =~ "codexThreadId"
+    refute JSON.encode!(progress["events"]) =~ "turnId"
+
+    {200, replayed_progress} =
+      http_json(
+        :get,
+        "http://127.0.0.1:#{port}/api/repositories/#{repository["key"]}/tasks/#{task["key"]}/runs/#{run_id}/events?after=#{URI.encode(first_event_id)}"
+      )
+
+    refute Enum.any?(replayed_progress["events"], &(&1["id"] == first_event_id))
+
+    {200, harness_status} =
+      http_json(:get, "http://127.0.0.1:#{port}/api/harness/status")
+
+    assert harness_status["harness"]["mode"] == "local_service"
+    assert harness_status["harness"]["limits"]["maxConcurrentRuns"] == 1
 
     {200, canceled} =
       http_json(

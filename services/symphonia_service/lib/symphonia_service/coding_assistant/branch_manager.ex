@@ -79,6 +79,27 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
   end
 
   def with_persistent_task_branch_worktree(repository, task, fun) when is_function(fun, 1) do
+    context = prepare_persistent_task_branch_worktree!(repository, task)
+
+    try do
+      case fun.(context) do
+        {:ok, result} ->
+          {:ok,
+           Map.merge(result, %{
+             "head_branch" => context.head_branch,
+             "base_branch" => context.base_branch,
+             "worktree_path" => context.repo_path
+           })}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    after
+      release_persistent_task_branch_worktree(context)
+    end
+  end
+
+  def prepare_persistent_task_branch_worktree!(repository, task) do
     ensure_repo_ready_for_task_branch!(repository, task)
 
     github = github_repo!(repository)
@@ -91,35 +112,36 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
     remote_url =
       github["clone_url"] || "https://github.com/#{github["owner"]}/#{github["name"]}.git"
 
-    with_auth(token, fn auth ->
+    auth = auth_context(token)
+
+    try do
       fetch_base!(repo_path, remote_url, base_branch, auth)
       fetch_branch(repo_path, remote_url, head_branch, auth)
       prepare_persistent_worktree!(repo_path, worktree_path, head_branch, base_branch)
 
-      context = %{
+      %{
         auth: auth,
         base_branch: base_branch,
         head_branch: head_branch,
         remote_url: remote_url,
         repo_path: worktree_path,
         source_repo_path: repo_path,
-        persistent: true
+        persistent: true,
+        workspace_provider: "local_git_worktree"
       }
-
-      case fun.(context) do
-        {:ok, result} ->
-          {:ok,
-           Map.merge(result, %{
-             "head_branch" => head_branch,
-             "base_branch" => base_branch,
-             "worktree_path" => worktree_path
-           })}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    end)
+    rescue
+      error ->
+        release_auth(auth)
+        reraise error, __STACKTRACE__
+    end
   end
+
+  def release_persistent_task_branch_worktree(context) when is_map(context) do
+    release_auth(context[:auth] || context["auth"])
+    :ok
+  end
+
+  def release_persistent_task_branch_worktree(_context), do: :ok
 
   def ensure_repo_ready_for_task_branch!(repository, task) do
     repo_path = repository["path"]
@@ -400,6 +422,16 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
   end
 
   defp with_auth(token, fun) do
+    auth = auth_context(token)
+
+    try do
+      fun.(auth)
+    after
+      release_auth(auth)
+    end
+  end
+
+  defp auth_context(token) do
     askpass = askpass_path()
 
     File.write!(askpass, """
@@ -412,14 +444,17 @@ defmodule SymphoniaService.CodingAssistant.BranchManager do
 
     File.chmod(askpass, 0o700)
 
-    auth = %{askpass: askpass, token: token}
-
-    try do
-      fun.(auth)
-    after
-      File.rm(askpass)
-    end
+    %{askpass: askpass, token: token}
   end
+
+  defp release_auth(%{askpass: askpass}) do
+    File.rm(askpass)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp release_auth(_auth), do: :ok
 
   defp askpass_path do
     Path.join(System.tmp_dir!(), "symphonia-git-askpass-#{System.unique_integer([:positive])}.sh")

@@ -45,6 +45,10 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
 
   assert.match(sidebar, /label="Clarise"/);
   assert.match(sidebar, /href=\{`\/r\/\$\{t\.key\.toLowerCase\(\)\}`\}/);
+  assert.match(sidebar, /Document tree menu/);
+  assert.match(sidebar, /Open document tree/);
+  assert.match(sidebar, /Close document tree/);
+  assert.match(sidebar, /symphonia\.doctreeOpen\.\$\{repoSlug\}/);
 
   assert.match(palette, /id: "nav-clarise"/);
   assert.match(palette, /router\.push\(`\/r\/\$\{slug\(r\.key\)\}`\)/);

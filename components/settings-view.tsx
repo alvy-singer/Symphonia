@@ -18,6 +18,7 @@ import {
   Plug,
   CreditCard,
   Check,
+  Activity,
   AlertTriangle,
   Github,
   ExternalLink,
@@ -31,6 +32,7 @@ type SectionId =
   | "appearance"
   | "notifications"
   | "workspace"
+  | "automation"
   | "integrations"
   | "security"
   | "billing";
@@ -40,13 +42,14 @@ const sections: { id: SectionId; label: string; icon: typeof UserIcon }[] = [
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "workspace", label: "Repository", icon: Building2 },
+  { id: "automation", label: "Automation", icon: Bot },
   { id: "integrations", label: "Integrations", icon: Plug },
   { id: "security", label: "Security", icon: KeyRound },
   { id: "billing", label: "Billing", icon: CreditCard },
 ];
 
 export function SettingsView({ repoKey }: { repoKey: string }) {
-  const [active, setActive] = useState<SectionId>("integrations");
+  const [active, setActive] = useState<SectionId>("automation");
   const [name, setName] = useState("Ava Martinez");
   const [email, setEmail] = useState("ava@symphonia.app");
   const [bio, setBio] = useState("Design lead, building calmer software.");
@@ -242,7 +245,6 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
               description="Connect Symphonia to the tools your team already uses."
             >
               <GitHubIntegration repoKey={repoKey} />
-              <AutomationIntegration repoKey={repoKey} />
               <IntegrationRow
                 source="linear"
                 name="Linear"
@@ -254,6 +256,16 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 desc="Post run summaries and review requests to channels and DMs."
                 initialConnected
               />
+            </Section>
+          )}
+
+          {active === "automation" && (
+            <Section
+              title="Automation"
+              description="Control local-first Codex execution for this repository."
+            >
+              <AutomationIntegration repoKey={repoKey} />
+              <HarnessPanel />
             </Section>
           )}
 
@@ -364,6 +376,63 @@ async function setAutomationEnabled(
   return payload.automation;
 }
 
+interface HarnessDecision {
+  at?: string;
+  repo?: string;
+  task?: string;
+  code: string;
+  dispatched?: boolean;
+  reason?: string;
+}
+
+interface HarnessProviderStatus {
+  id: string;
+  label: string;
+  configured: boolean;
+  ready: boolean;
+  runnable: boolean;
+  reason?: string;
+}
+
+interface HarnessStatus {
+  running: boolean;
+  online?: boolean;
+  mode?: string;
+  intervalMs?: number;
+  limits?: {
+    maxClaimsPerTick?: number;
+    maxClaimsPerRepo?: number;
+    maxConcurrentRuns?: number;
+  };
+  providerReadiness?: {
+    runnableProvider?: string;
+    providers?: HarnessProviderStatus[];
+  };
+  lastHeartbeatAt?: string;
+  lastDispatch?: {
+    at?: string;
+    repo?: string;
+    task?: string;
+    runId?: string;
+  } | null;
+  lastError?: {
+    at?: string;
+    repo?: string;
+    task?: string;
+    message?: string;
+  } | null;
+  recentDecisions?: HarnessDecision[];
+}
+
+async function fetchHarnessStatus(): Promise<HarnessStatus> {
+  const res = await fetch("/api/harness/status", { cache: "no-store" });
+  const payload = (await res.json()) as { harness?: HarnessStatus; error?: string };
+  if (!res.ok || !payload.harness) {
+    throw new Error(payload.error ?? "Could not load Harness status");
+  }
+  return payload.harness;
+}
+
 function AutomationIntegration({ repoKey }: { repoKey: string }) {
   const [automation, setAutomation] = useState<RepositoryAutomationState | null>(null);
   const [pending, setPending] = useState(false);
@@ -427,6 +496,208 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
       </div>
     </div>
   );
+}
+
+function HarnessPanel() {
+  const [status, setStatus] = useState<HarnessStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refresh = () => {
+      fetchHarnessStatus()
+        .then((nextStatus) => {
+          if (cancelled) return;
+          setStatus(nextStatus);
+          setError(null);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : "Could not load Harness");
+        });
+    };
+
+    refresh();
+    const interval = window.setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const providers = status?.providerReadiness?.providers ?? [];
+  const runnableProvider = providers.find((provider) => provider.id === "codex_app_server");
+  const skipped = (status?.recentDecisions ?? [])
+    .filter((decision) => !decision.dispatched)
+    .slice(-4)
+    .reverse();
+
+  return (
+    <div className="rounded-[10px] border bg-card shadow-[var(--elevation-card)]">
+      <div className="flex items-start justify-between gap-3 p-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-muted text-foreground">
+            <Activity className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-medium">Harness</div>
+            <div className="text-xs text-muted-foreground">
+              Local service runner for review-first Codex task work.
+            </div>
+          </div>
+        </div>
+        <StatusPill
+          tone={status?.online && status.running ? "ready" : error ? "warning" : "neutral"}
+          label={status?.online && status.running ? "Running" : error ? "Unavailable" : "Loading"}
+        />
+      </div>
+
+      <div className="border-t px-3 py-3">
+        {error ? (
+          <div className="text-xs text-amber-700 dark:text-amber-300">{error}</div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <HarnessMetric label="Mode" value={status?.mode ?? "local_service"} />
+            <HarnessMetric
+              label="Heartbeat"
+              value={formatShortDate(status?.lastHeartbeatAt) ?? "No tick yet"}
+            />
+            <HarnessMetric
+              label="Interval"
+              value={status?.intervalMs ? `${Math.round(status.intervalMs / 1000)}s` : "Loading"}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="border-t px-3 py-3">
+        <div className="mb-2 text-[11px] font-medium uppercase text-muted-foreground">
+          Limits
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <HarnessMetric
+            label="Per tick"
+            value={String(status?.limits?.maxClaimsPerTick ?? 1)}
+          />
+          <HarnessMetric
+            label="Per repository"
+            value={String(status?.limits?.maxClaimsPerRepo ?? 1)}
+          />
+          <HarnessMetric
+            label="Concurrent"
+            value={String(status?.limits?.maxConcurrentRuns ?? 1)}
+          />
+        </div>
+      </div>
+
+      <div className="border-t px-3 py-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-[11px] font-medium uppercase text-muted-foreground">
+            Provider readiness
+          </div>
+          <StatusPill
+            tone={runnableProvider?.ready ? "ready" : "warning"}
+            label={runnableProvider?.ready ? "Codex ready" : "Codex blocked"}
+          />
+        </div>
+        <div className="space-y-2">
+          {providers.map((provider) => (
+            <div key={provider.id} className="flex items-center justify-between gap-3 text-xs">
+              <div className="min-w-0">
+                <div className="font-medium">{provider.label}</div>
+                <div className="truncate text-muted-foreground">{provider.reason}</div>
+              </div>
+              <span className="shrink-0 text-muted-foreground">
+                {provider.runnable ? (provider.ready ? "Ready" : "Needs setup") : "Disabled"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="border-t px-3 py-3">
+        <div className="mb-2 text-[11px] font-medium uppercase text-muted-foreground">
+          Last dispatch
+        </div>
+        {status?.lastDispatch ? (
+          <div className="text-xs text-muted-foreground">
+            <span className="font-mono text-foreground">{status.lastDispatch.task}</span>
+            <span> started </span>
+            <span>{formatShortDate(status.lastDispatch.at) ?? "recently"}</span>
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground">No daemon dispatch recorded.</div>
+        )}
+        {status?.lastError?.message && (
+          <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+            {status.lastError.message}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t px-3 py-3">
+        <div className="mb-2 text-[11px] font-medium uppercase text-muted-foreground">
+          Recent skipped reasons
+        </div>
+        {skipped.length > 0 ? (
+          <ul className="space-y-2">
+            {skipped.map((decision, index) => (
+              <li key={`${decision.at ?? "decision"}-${decision.task ?? index}`} className="text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-foreground">{decision.task ?? decision.repo}</span>
+                  <span className="text-muted-foreground">{decision.code}</span>
+                </div>
+                {decision.reason && (
+                  <div className="mt-0.5 text-muted-foreground">{decision.reason}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-xs text-muted-foreground">No skipped daemon decisions yet.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HarnessMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 border-l px-2.5 py-1">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="truncate text-sm font-medium">{value}</div>
+    </div>
+  );
+}
+
+function StatusPill({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "ready" | "warning" | "neutral";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center rounded-[8px] border px-2.5 py-1 text-xs",
+        tone === "ready" &&
+          "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+        tone === "warning" &&
+          "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        tone === "neutral" && "text-muted-foreground",
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function formatShortDate(value?: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function GitHubIntegration({ repoKey }: { repoKey: string }) {

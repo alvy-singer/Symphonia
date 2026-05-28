@@ -1,0 +1,85 @@
+defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
+  @moduledoc """
+  Public provider readiness for the Harness surface.
+
+  Harness V1 can execute only Codex App Server. Other assistants may be shown in
+  product surfaces, but they are intentionally not runnable by the always-on
+  daemon until they satisfy the full execution contract.
+  """
+
+  alias SymphoniaService.CodingAssistant.AppServerClient
+
+  @disabled_reason "Not runnable by Harness V1."
+
+  def harness_status do
+    %{
+      "defaultProvider" => "codex_app_server",
+      "runnableProvider" => "codex_app_server",
+      "providers" => [
+        codex_app_server_status(),
+        disabled_provider("claude_code", "Claude Code"),
+        disabled_provider("gemini", "Gemini"),
+        disabled_provider("cursor", "Cursor")
+      ]
+    }
+  end
+
+  defp codex_app_server_status do
+    case codex_app_server_ready?() do
+      :ok ->
+        %{
+          "id" => "codex_app_server",
+          "label" => "Codex App Server",
+          "configured" => true,
+          "ready" => true,
+          "runnable" => true,
+          "reason" => "Ready for local Codex runs."
+        }
+
+      {:error, reason} ->
+        %{
+          "id" => "codex_app_server",
+          "label" => "Codex App Server",
+          "configured" => configured?(),
+          "ready" => false,
+          "runnable" => true,
+          "reason" => reason
+        }
+    end
+  end
+
+  defp codex_app_server_ready? do
+    with :ok <- AppServerClient.ensure_schema_bundle!(),
+         :ok <- AppServerClient.ensure_daemon_ready!() do
+      :ok
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp configured? do
+    truthy?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")) ||
+      nonblank?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND")) ||
+      nonblank?(System.get_env("SYMPHONIA_CODEX_BIN")) ||
+      nonblank?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_BIN")) ||
+      nonblank?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_STANDALONE_BIN"))
+  end
+
+  defp disabled_provider(id, label) do
+    %{
+      "id" => id,
+      "label" => label,
+      "configured" => false,
+      "ready" => false,
+      "runnable" => false,
+      "reason" => @disabled_reason
+    }
+  end
+
+  defp nonblank?(value) when is_binary(value), do: String.trim(value) != ""
+  defp nonblank?(_value), do: false
+  defp truthy?(true), do: true
+  defp truthy?("true"), do: true
+  defp truthy?("1"), do: true
+  defp truthy?(_value), do: false
+end

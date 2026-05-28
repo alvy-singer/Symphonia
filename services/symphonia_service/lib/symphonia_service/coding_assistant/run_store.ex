@@ -145,9 +145,6 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "message" => RunEvents.public_message(run),
       "displayStep" => RunEvents.display_step(run),
       "displayMessage" => RunEvents.display_message(run),
-      "workspacePath" => run["workspace_path"],
-      "codexThreadId" => run["codex_thread_id"],
-      "turnId" => run["turn_id"],
       "eligibilityReason" => run["eligibility_reason"],
       "reviewBranch" => run["review_branch"],
       "curatedSummaryPath" => run["curated_summary_path"],
@@ -163,15 +160,37 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     |> Map.get("timeline", [])
     |> List.wrap()
     |> Enum.filter(&is_map/1)
-    |> Enum.map(fn event ->
+    |> Enum.with_index(1)
+    |> Enum.map(fn {event, index} ->
       %{
+        "id" => progress_event_id(run, index),
+        "event" => "run-progress",
         "at" => event["at"],
-        "label" => event["label"],
-        "threadId" => event["thread_id"],
-        "turnId" => event["turn_id"]
+        "label" => event["label"]
       }
       |> reject_nil()
     end)
+  end
+
+  def public_progress_events(run, opts \\ []) do
+    after_id = Keyword.get(opts, :after)
+
+    events =
+      run
+      |> progress_source_events()
+      |> Enum.with_index()
+      |> Enum.map(fn {event, index} -> public_progress_event(run, event, index) end)
+
+    case after_id do
+      value when is_binary(value) and value != "" ->
+        case Enum.find_index(events, &(&1["id"] == value)) do
+          nil -> events
+          index -> Enum.drop(events, index + 1)
+        end
+
+      _ ->
+        events
+    end
   end
 
   def get(id, opts \\ []) when is_binary(id) do
@@ -256,6 +275,58 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
 
     Map.update(run, "timeline", [event], &(List.wrap(&1) ++ [event]))
   end
+
+  defp progress_source_events(run) do
+    queued = %{
+      "at" => run["created_at"],
+      "label" => RunEvents.default_step("queued"),
+      "state" => "queued"
+    }
+
+    timeline =
+      run
+      |> Map.get("timeline", [])
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
+
+    [queued | timeline]
+  end
+
+  defp public_progress_event(run, event, index) do
+    event_run = %{
+      "state" => progress_event_state(run, event),
+      "current_step" => event["label"] || run["current_step"],
+      "message" => run["message"]
+    }
+
+    %{
+      "id" => progress_event_id(run, index),
+      "event" => "run-progress",
+      "runId" => run["id"],
+      "taskKey" => run["task"],
+      "state" => event_run["state"],
+      "displayStep" => RunEvents.display_step(event_run),
+      "displayMessage" => RunEvents.display_message(event_run),
+      "reviewBranch" => run["review_branch"],
+      "curatedSummaryPath" => run["curated_summary_path"],
+      "updatedAt" => event["at"] || run["updated_at"]
+    }
+    |> reject_nil()
+  end
+
+  defp progress_event_state(_run, %{"state" => state}) when is_binary(state), do: state
+
+  defp progress_event_state(_run, %{"label" => "Ready for review"}), do: "completed"
+  defp progress_event_state(_run, %{"label" => "Run failed"}), do: "failed"
+  defp progress_event_state(_run, %{"label" => "Canceled"}), do: "canceled"
+
+  defp progress_event_state(%{"state" => state}, _event)
+       when state in ["completed", "failed", "canceled"],
+       do: "running"
+
+  defp progress_event_state(%{"state" => state}, _event), do: state || "running"
+
+  defp progress_event_id(run, index), do: "#{run["id"]}:#{index}"
 
   defp run_id do
     suffix = :crypto.strong_rand_bytes(6) |> Base.url_encode64(padding: false)

@@ -163,6 +163,20 @@ defmodule SymphoniaService.CodingAssistant do
     end
   end
 
+  def get_run_progress_events(repository, task_key, run_id, opts \\ []) do
+    case RunStore.get(run_id) do
+      nil ->
+        raise ArgumentError, "Run #{run_id} not found."
+
+      run ->
+        if run["repository"] == repository["key"] and run["task"] == task_key do
+          RunStore.public_progress_events(run, opts)
+        else
+          raise ArgumentError, "Run #{run_id} does not belong to task #{task_key}."
+        end
+    end
+  end
+
   def cancel_run(repository, task_key, run_id) do
     case RunStore.get(run_id) do
       nil ->
@@ -247,9 +261,6 @@ defmodule SymphoniaService.CodingAssistant do
       "message" => RunEvents.public_message(run),
       "display_step" => RunEvents.display_step(run),
       "display_message" => RunEvents.display_message(run),
-      "workspace_path" => run["workspace_path"],
-      "codex_thread_id" => run["codex_thread_id"],
-      "turn_id" => run["turn_id"],
       "eligibility_reason" => run["eligibility_reason"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
@@ -280,8 +291,25 @@ defmodule SymphoniaService.CodingAssistant do
   end
 
   defp previous_codex_thread_id(task) do
-    get_in(task, [:frontmatter, "run", "codex_thread_id"]) ||
+    latest_private_codex_thread_id(task) ||
+      get_in(task, [:frontmatter, "run", "codex_thread_id"]) ||
       get_in(task, ["run", "codexThreadId"]) ||
       get_in(task, ["run", "codex_thread_id"])
+  end
+
+  defp latest_private_codex_thread_id(task) do
+    RunStore.list()
+    |> Enum.filter(fn run ->
+      run["repository"] == task["repo"] and run["task"] == task["key"] and
+        is_binary(run["codex_thread_id"]) and String.trim(run["codex_thread_id"]) != ""
+    end)
+    |> Enum.sort_by(&(&1["updated_at"] || &1["created_at"] || ""), :desc)
+    |> List.first()
+    |> case do
+      nil -> nil
+      run -> run["codex_thread_id"]
+    end
+  rescue
+    _error -> nil
   end
 end

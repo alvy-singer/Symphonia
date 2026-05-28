@@ -161,6 +161,10 @@ defmodule SymphoniaService.HTTPServer do
         Daemon.ensure_started(registry_path)
         {200, %{"daemon" => Daemon.status()}}
 
+      ["api", "harness", "status"] ->
+        Daemon.ensure_started(registry_path)
+        {200, %{"harness" => Daemon.status()}}
+
       ["api", "repositories", repo, "workflow"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "workflow" => Workspace.workflow(repository)}}
@@ -195,6 +199,17 @@ defmodule SymphoniaService.HTTPServer do
       ] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         events = CodingAssistant.get_run_events(repository, task_key, run_id)
+        {200, %{"events" => events}}
+
+      ["api", "repositories", repo, "tasks", task_key, "runs", run_id, "events"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        params = query_params(path)
+
+        events =
+          CodingAssistant.get_run_progress_events(repository, task_key, run_id,
+            after: Map.get(params, "after")
+          )
+
         {200, %{"events" => events}}
 
       ["api", "repositories", repo, "tasks", task_key, "harness", "eligibility"] ->

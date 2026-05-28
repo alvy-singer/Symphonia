@@ -11,11 +11,14 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
     AppServerClient,
     BranchManager,
     ChangeDetector,
+    ContextPack,
     CuratedSummary,
     HandoffBuilder,
     RunEvents,
     RunStore
   }
+
+  alias SymphoniaService.Runner.LocalGitWorktreeProvider
 
   @impl true
   def id, do: "codex_app_server"
@@ -39,36 +42,44 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
       with :ok <- AppServerClient.ensure_schema_bundle!(),
            :ok <- AppServerClient.ensure_daemon_ready!(app_server_opts(run, params)),
            :ok <- branch_preflight(repository, task) do
-        BranchManager.with_persistent_task_branch_worktree(repository, task, fn context ->
+        with {:ok, context} <- LocalGitWorktreeProvider.prepare(repository, task, run, params) do
           RunStore.update_metadata(run, %{
             "workspace_path" => context.repo_path,
             "review_branch" => context.head_branch
           })
 
-          prompt = build_prompt(repository, task, context, params)
+          try do
+            prompt =
+              ContextPack.render_prompt(repository, task, context, params, mode: :app_server)
 
-          with {:ok, output} <-
-                 invoke_app_server(repository, task["key"], run, context.repo_path, prompt),
-               {:ok, changes} <- detect_and_clean_changes(run, context.repo_path),
-               :ok <- ensure_committable_changes(changes),
-               {:ok, summary_path} <- write_summary(run, context.repo_path, task, changes, output),
-               :ok <- commit_and_push(run, context, task, changes, summary_path) do
-            files_changed = Enum.sort(changes["committable"] ++ [summary_path])
+            with {:ok, output} <-
+                   invoke_app_server(repository, task["key"], run, context.repo_path, prompt),
+                 {:ok, changes} <- detect_and_clean_changes(run, context.repo_path),
+                 :ok <- ensure_committable_changes(changes),
+                 {:ok, summary_path} <-
+                   write_summary(run, context.repo_path, task, changes, output),
+                 :ok <- commit_and_push(run, context, task, changes, summary_path) do
+              files_changed = Enum.sort(changes["committable"] ++ [summary_path])
 
-            handoff =
-              HandoffBuilder.build_from_changes(
-                task,
-                context,
-                files_changed,
-                output["last_message"]
-              )
-              |> Map.put("curated_summary_path", summary_path)
+              handoff =
+                HandoffBuilder.build_from_changes(
+                  task,
+                  context,
+                  files_changed,
+                  output["last_message"]
+                )
+                |> Map.put("head_branch", context.head_branch)
+                |> Map.put("base_branch", context.base_branch)
+                |> Map.put("curated_summary_path", summary_path)
 
-            {:ok, handoff}
-          else
-            {:error, reason} -> {:error, reason}
+              {:ok, handoff}
+            else
+              {:error, reason} -> {:error, reason}
+            end
+          after
+            LocalGitWorktreeProvider.release(context, %{})
           end
-        end)
+        end
       end
     end
   rescue
@@ -161,9 +172,6 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
       "message" => RunEvents.public_message(run),
       "display_step" => RunEvents.display_step(run),
       "display_message" => RunEvents.display_message(run),
-      "workspace_path" => run["workspace_path"],
-      "codex_thread_id" => run["codex_thread_id"],
-      "turn_id" => run["turn_id"],
       "eligibility_reason" => run["eligibility_reason"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
@@ -221,81 +229,6 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
     error -> {:error, Exception.message(error)}
   end
 
-  defp build_prompt(repository, task, context, params) do
-    assistant_input = Map.get(params, "assistant_input")
-    workflow = read_workflow(context.repo_path)
-
-    """
-    You are the Coding Assistant working inside a Symphonía persistent task workspace.
-
-    Task key: #{task["key"]}
-    Task title: #{task["title"]}
-    Repository: #{repository["name"] || repository["key"]}
-    Base branch: #{context.base_branch}
-    Head branch: #{context.head_branch}
-    Workspace path: #{context.repo_path}
-
-    Task brief:
-    #{task_brief(task, assistant_input)}
-
-    #{continuation_block(assistant_input)}
-    Review expectations:
-    #{review_expectations(task)}
-
-    WORKFLOW.md:
-    #{workflow}
-
-    Rules:
-    - Make the code changes needed for the task in this workspace.
-    - Do not commit, push, or open a pull request; Symphonía will commit and push selected work-product files.
-    - Do not edit symphonia/tasks, symphonia/run-summaries, WORKFLOW.md, .symphonia, or registry files.
-    - Finish with a concise summary of what changed and any validation you performed.
-    """
-    |> String.trim()
-    |> Kernel.<>("\n")
-  end
-
-  defp continuation_block(value) when is_binary(value) do
-    value = String.trim(value)
-    if value == "", do: "", else: "Continuation input:\n#{value}\n"
-  end
-
-  defp continuation_block(_value), do: ""
-
-  defp task_brief(task, assistant_input) when is_binary(assistant_input) do
-    task
-    |> Map.get("body", "")
-    |> strip_review_history()
-    |> String.trim()
-  end
-
-  defp task_brief(task, _assistant_input), do: String.trim(task["body"] || "")
-
-  defp strip_review_history(body) do
-    body
-    |> String.split(~r/\n## (Review notes|Handoff history)\b/, parts: 2)
-    |> List.first()
-    |> to_string()
-  end
-
-  defp review_expectations(task) do
-    task
-    |> Map.get("reviewExpectations", [])
-    |> List.wrap()
-    |> Enum.reject(&blank?/1)
-    |> case do
-      [] -> "- Review the changed files against the task acceptance criteria."
-      values -> Enum.map_join(values, "\n", &"- #{&1}")
-    end
-  end
-
-  defp read_workflow(repo_path) do
-    case File.read(Path.join(repo_path, "WORKFLOW.md")) do
-      {:ok, body} -> String.trim(body)
-      {:error, _reason} -> "No WORKFLOW.md found."
-    end
-  end
-
   defp app_server_args do
     case System.get_env("SYMPHONIA_CODEX_APP_SERVER_ARGS") do
       value when is_binary(value) and value != "" -> String.split(value, " ", trim: true)
@@ -306,6 +239,4 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
   defp force_failure?(params) do
     Map.get(params, "forceFailure") == true or Map.get(params, "force_failure") == true
   end
-
-  defp blank?(value), do: is_nil(value) or (is_binary(value) and String.trim(value) == "")
 end

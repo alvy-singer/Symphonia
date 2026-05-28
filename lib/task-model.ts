@@ -73,10 +73,18 @@ export interface CodingAssistantRun {
 }
 
 export interface CodingAssistantRunEvent {
+  id?: string;
+  event?: "run-progress" | string;
   at?: string;
   label?: string;
-  threadId?: string;
-  turnId?: string;
+  runId?: string;
+  taskKey?: string;
+  state?: string;
+  displayStep?: string;
+  displayMessage?: string;
+  reviewBranch?: string;
+  curatedSummaryPath?: string;
+  updatedAt?: string;
 }
 
 export interface CodingAssistantHandoff {

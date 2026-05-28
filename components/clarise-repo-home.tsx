@@ -692,16 +692,6 @@ function ClariseThreadSidebar({
         )}
       </ThreadListPrimitive.Root>
 
-      <div className="border-t border-sidebar-border p-2">
-        <p className="mb-2 px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          GSD loop
-        </p>
-        <div className="grid grid-cols-2 gap-1.5">
-          {SLASH_COMMANDS.slice(0, 7).map((item) => (
-            <ClarisePromptButton key={item.command} prompt={item.prompt} label={item.label} />
-          ))}
-        </div>
-      </div>
     </aside>
   );
 }
@@ -725,21 +715,6 @@ function ClariseThreadListItem({ onNavigate }: { onNavigate: () => void }) {
         <Trash2 className="h-3.5 w-3.5" />
       </ThreadListItemPrimitive.Delete>
     </ThreadListItemPrimitive.Root>
-  );
-}
-
-function ClarisePromptButton({ prompt, label }: { prompt: string; label: string }) {
-  const composer = useComposerRuntime();
-
-  return (
-    <button
-      type="button"
-      onClick={() => composer.setText(prompt)}
-      className="truncate rounded-[7px] border border-sidebar-border px-2 py-1.5 text-left text-[12px] text-muted-foreground transition hover:bg-sidebar-accent hover:text-foreground"
-      title={label}
-    >
-      {label}
-    </button>
   );
 }
 

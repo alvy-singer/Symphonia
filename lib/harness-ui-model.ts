@@ -90,8 +90,9 @@ export function runTimelineForTask(
   const events = runEvents.length > 0 ? runEvents : (task.run?.timeline ?? []);
 
   return events.map((event) => ({
-    ...(event.at ? { at: event.at } : {}),
-    ...(event.label ? { label: event.label } : {}),
+    ...(event.id ? { id: event.id } : {}),
+    ...(event.at || event.updatedAt ? { at: event.at ?? event.updatedAt } : {}),
+    ...(event.label || event.displayStep ? { label: event.label ?? event.displayStep } : {}),
   }));
 }
 

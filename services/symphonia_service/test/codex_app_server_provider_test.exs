@@ -5,6 +5,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
   alias SymphoniaService.CodingAssistant.{AppServerClient, RunStore}
   alias SymphoniaService.GitHub.InstallationStore
   alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
+  alias SymphoniaService.Runner.LocalGitWorktreeProvider
   alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
 
   defmodule StubClient do
@@ -154,6 +155,14 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     result = Daemon.tick(name)
 
     assert [%{"code" => "dispatched", "dispatched" => true} | _rest] = result["decisions"]
+    assert Enum.count(result["decisions"], & &1["dispatched"]) == 1
+    assert result["limits"]["maxClaimsPerTick"] == 1
+    assert result["limits"]["maxClaimsPerRepo"] == 1
+    assert result["limits"]["maxConcurrentRuns"] == 1
+    assert result["lastHeartbeatAt"]
+    assert result["lastDispatch"]["task"] == "SYM-1"
+    assert result["providerReadiness"]["runnableProvider"] == "codex_app_server"
+
     second_result = Daemon.tick(name)
     refute Enum.any?(second_result["decisions"], &(&1["task"] == "SYM-1" and &1["dispatched"]))
 
@@ -234,6 +243,43 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     review_branch_explanation = Eligibility.explain(repository, review_blocked_task)
     assert review_branch_explanation["eligible"] == false
     assert review_branch_explanation["code"] == "review_branch_exists"
+  end
+
+  test "daemon does not claim a task while a global active run exists", %{
+    registry_path: registry_path,
+    repository: repository,
+    runs_root: runs_root
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+
+    RunStore.create(
+      %{
+        "provider" => "codex_app_server",
+        "repository" => repository["key"],
+        "task" => task["key"]
+      },
+      root: runs_root
+    )
+
+    name = :"harness_daemon_active_run_test_#{System.unique_integer([:positive])}"
+    {:ok, _pid} = Daemon.start_link(registry_path: registry_path, timer?: false, name: name)
+
+    result = Daemon.tick(name)
+
+    refute Enum.any?(result["decisions"], & &1["dispatched"])
+    assert [%{"code" => "max_concurrent_runs_reached"} | _rest] = result["decisions"]
+  end
+
+  test "local workspace provider release preserves persistent task worktree", %{
+    repository: repository
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+
+    assert {:ok, context} = LocalGitWorktreeProvider.prepare(repository, task, %{}, %{})
+    assert File.dir?(context.repo_path)
+
+    assert :ok = LocalGitWorktreeProvider.release(context, %{})
+    assert File.dir?(context.repo_path)
   end
 
   test "created Markdown task can start a Codex App Server-backed run", %{
@@ -402,8 +448,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
 
     task = TaskStore.get_task(repository, task["key"])
     assert task["run"]["displayStep"] == "Codex is working"
-    assert task["run"]["codexThreadId"] == "thread-fake"
-    assert task["run"]["turnId"] == "turn-fake"
+    refute Map.has_key?(task["run"], "codexThreadId")
+    refute Map.has_key?(task["run"], "turnId")
+    refute Map.has_key?(task["run"], "workspacePath")
 
     wait_for_run(runs_root, result["run"]["id"], "completed")
     wait_for_task_status(repository, task["key"], "in_review")

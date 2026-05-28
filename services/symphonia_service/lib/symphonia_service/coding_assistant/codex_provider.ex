@@ -5,7 +5,13 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
 
   @behaviour SymphoniaService.CodingAssistant.Provider
 
-  alias SymphoniaService.CodingAssistant.{BranchManager, ChangeDetector, HandoffBuilder, RunStore}
+  alias SymphoniaService.CodingAssistant.{
+    BranchManager,
+    ChangeDetector,
+    ContextPack,
+    HandoffBuilder,
+    RunStore
+  }
 
   @default_timeout_ms 900_000
 
@@ -31,7 +37,7 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
            :ok <- branch_preflight(repository, task) do
         BranchManager.with_task_branch_worktree(repository, task, fn context ->
           RunStore.mark_step(run, "Preparing repository")
-          prompt = build_prompt(repository, task, context, params)
+          prompt = ContextPack.render_prompt(repository, task, context, params, mode: :codex)
 
           with {:ok, output} <- invoke_codex(run, context.repo_path, prompt),
                {:ok, changes} <- detect_and_clean_changes(run, context.repo_path),
@@ -199,66 +205,6 @@ defmodule SymphoniaService.CodingAssistant.CodexProvider do
     |> case do
       nil -> "The Coding Assistant run failed."
       message -> message
-    end
-  end
-
-  defp build_prompt(repository, task, context, params) do
-    assistant_input = Map.get(params, "assistant_input")
-    workflow = read_workflow(context.repo_path)
-
-    """
-    You are the Coding Assistant working inside a Symphonía repository workspace.
-
-    Task key: #{task["key"]}
-    Task title: #{task["title"]}
-    Repository: #{repository["name"] || repository["key"]}
-    Base branch: #{context.base_branch}
-    Head branch: #{context.head_branch}
-
-    Task brief:
-    #{task_brief(task, assistant_input)}
-
-    #{continuation_block(assistant_input)}
-    WORKFLOW.md:
-    #{workflow}
-
-    Rules:
-    - Make the smallest code changes needed for the task.
-    - Do not commit or push; Symphonía will commit and push selected work-product files.
-    - Do not edit symphonia/tasks, symphonia/run-summaries, WORKFLOW.md, .symphonia, or registry files.
-    - Finish with a concise summary of what changed and any validation you performed.
-    """
-    |> String.trim()
-    |> Kernel.<>("\n")
-  end
-
-  defp continuation_block(value) when is_binary(value) do
-    value = String.trim(value)
-    if value == "", do: "", else: "Continuation input:\n#{value}\n"
-  end
-
-  defp continuation_block(_value), do: ""
-
-  defp task_brief(task, assistant_input) when is_binary(assistant_input) do
-    task
-    |> Map.get("body", "")
-    |> strip_review_history()
-    |> String.trim()
-  end
-
-  defp task_brief(task, _assistant_input), do: String.trim(task["body"] || "")
-
-  defp strip_review_history(body) do
-    body
-    |> String.split(~r/\n## (Review notes|Handoff history)\b/, parts: 2)
-    |> List.first()
-    |> to_string()
-  end
-
-  defp read_workflow(repo_path) do
-    case File.read(Path.join(repo_path, "WORKFLOW.md")) do
-      {:ok, body} -> String.trim(body)
-      {:error, _reason} -> "No WORKFLOW.md found."
     end
   end
 
