@@ -77,7 +77,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("github") === "installed") {
-      setNotice("GitHub connected. Pick a repository to open Clarise.");
+      setNotice("GitHub connected. Pick a repository to open Clarise and create workspace files.");
       window.history.replaceState({}, "", window.location.pathname);
     } else if (params.get("github") === "install-canceled") {
       setError("GitHub installation was canceled.");
@@ -180,7 +180,7 @@ export default function DashboardPage() {
   const openDashboardClarise = () => {
     const repository = repositories[0];
     if (!repository) {
-      setError("Open a repository first.");
+      setError("Connect a repository first.");
       return;
     }
     router.push(`/r/${repository.key.toLowerCase()}`);
@@ -272,8 +272,9 @@ export default function DashboardPage() {
           </button>
           <button
             onClick={openDashboardClarise}
-            title="Ask Clarise"
-            className="inline-grid h-9 w-9 place-items-center rounded-[8px] border bg-card text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            disabled={repositories.length === 0}
+            title={repositories.length === 0 ? "Connect a repository first" : "Ask Clarise"}
+            className="inline-grid h-9 w-9 place-items-center rounded-[8px] border bg-card text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
             aria-label="Ask Clarise"
           >
             <Sparkles className="h-4 w-4" />
@@ -292,10 +293,11 @@ export default function DashboardPage() {
               Repository dashboard
             </p>
             <h1 className="mt-4 text-balance text-[42px] font-bold leading-[1] tracking-[-0.045em] md:text-[58px]">
-              Connect the codebase before the agents start.
+              Connect a repo. Clarise creates the workspace files.
             </h1>
             <p className="mt-4 max-w-xl text-[17px] leading-7 text-muted-foreground">
-              Pick a GitHub repository or open an existing local workspace.
+              After a repository opens, use Clarise to create the GSD workspace:
+              milestones, requirements, plans, decisions, and task briefs.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-3">
               <button
@@ -309,14 +311,6 @@ export default function DashboardPage() {
                 Connect to GitHub
                 <ArrowRight className="h-4 w-4" />
               </button>
-              <button
-                onClick={openDashboardClarise}
-                className="inline-flex h-10 items-center gap-2 rounded-[8px] border bg-card px-4 text-[15px] font-semibold text-foreground transition hover:bg-accent"
-              >
-                <Sparkles className="h-4 w-4" />
-                Ask Clarise
-              </button>
-              <span className="text-[13px] text-muted-foreground">{connectedCount} connected</span>
             </div>
           </div>
         </section>
@@ -455,8 +449,8 @@ function EmptyRepositoryState({
         {connectedCount > 0 ? "No matching repositories" : "No repositories connected yet"}
       </h3>
       <p className="mx-auto mt-3 max-w-md text-[15px] leading-6 text-muted-foreground">
-        Connect GitHub to bring your repositories into Symphonia. Once a repo is
-            opened, Clarise becomes the first stop and the workspace stays close by.
+        Connect GitHub to bring your repositories into Symphonia. Once a repo is opened,
+        Clarise becomes the first stop for creating the editable workspace files.
       </p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
         <button
@@ -532,7 +526,7 @@ function GitHubRepositoryCard({
             {fullName}
           </h4>
           <p className="truncate text-[13px] text-muted-foreground">
-            Connected on GitHub
+            Open in Clarise to create workspace files
             {repository.defaultBranch ? ` / ${repository.defaultBranch}` : ""}
           </p>
         </div>
@@ -540,9 +534,9 @@ function GitHubRepositoryCard({
       </div>
 
       <dl className="mt-5 grid grid-cols-3 gap-2 text-center">
-        <Stat label="Status" value={opening ? "Opening" : "Connected"} />
+        <Stat label="Repo" value={opening ? "Opening" : "Connected"} />
+        <Stat label="Workspace" value="Needs Clarise" muted />
         <Stat label="Account" value={repository.accountLogin ?? repository.owner} />
-        <Stat label="Branch" value={repository.defaultBranch ?? "-"} />
       </dl>
 
       <div className="mt-4 flex items-center justify-between gap-2">
@@ -594,6 +588,7 @@ function RepositoryCard({
   const files = workspace?.initialized ? "Ready" : "Missing";
   const rules = workspace?.workflow.exists ? "Ready" : "Missing";
   const href = `/r/${repository.key.toLowerCase()}`;
+  const workspaceReady = workspace?.initialized && workspace.workflow.exists;
 
   return (
     <div
@@ -625,17 +620,26 @@ function RepositoryCard({
               ? `${repository.github.owner}/${repository.github.name}`
               : "Local repository"}
           </p>
+          <p className="mt-1 truncate text-[12px] text-muted-foreground">
+            {workspaceReady
+              ? "Workspace files are ready to edit"
+              : "Use Clarise to create workspace files"}
+          </p>
         </div>
         <ChevronRight className="h-5 w-5 text-muted-foreground transition-colors group-hover:text-foreground" />
       </div>
 
       <dl className="mt-5 grid grid-cols-3 gap-2 text-center">
-        <Stat label="Tasks" value={String(repository.taskCount ?? 0)} />
+        <Stat label="Start" value={workspaceReady ? "Workspace" : "Clarise"} />
         <Stat label="Files" value={files} muted={!workspace?.initialized} />
         <Stat label="Rules" value={rules} muted={!workspace?.workflow.exists} />
       </dl>
 
-      <div className="mt-4 flex justify-end">
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <span className="inline-flex items-center gap-1 text-[13px] font-medium text-primary">
+          {workspaceReady ? "Open repo" : "Open Clarise"}
+          <ArrowRight className="h-3.5 w-3.5" />
+        </span>
         <button
           type="button"
           onClick={() => onRemove(repository)}

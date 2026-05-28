@@ -1,10 +1,9 @@
-import { SpecWorkspaceIndex } from "@/components/spec-workspace-index";
+import { notFound } from "next/navigation";
 
 export default async function WorkspacePage({
-  params,
+  params: _params,
 }: {
   params: Promise<{ repoKey: string }>;
 }) {
-  const { repoKey } = await params;
-  return <SpecWorkspaceIndex repoKey={repoKey.toUpperCase()} />;
+  notFound();
 }

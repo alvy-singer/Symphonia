@@ -2,10 +2,12 @@ import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } 
 import { NextResponse } from "next/server";
 import {
   normalizeClarisePlan,
+  normalizeClariseModelProfile,
   normalizeClariseProvider,
   planClariseResponse,
   type ClariseArtifactDraft,
   type ClariseChatMessage,
+  type ClariseModelProfile,
   type ClarisePlan,
   type ClariseProviderId,
 } from "@/lib/clarise-chat";
@@ -82,10 +84,13 @@ export async function POST(
 ) {
   const { repoKey } = await params;
   const payload = (await request.json().catch(() => ({}))) as {
+    id?: unknown;
+    modelProfile?: unknown;
     provider?: unknown;
     messages?: UIMessage[];
   };
   const provider = normalizeClariseProvider(payload.provider);
+  const modelProfile = normalizeClariseModelProfile(payload.modelProfile);
   const providerConfig = PROVIDERS[provider];
 
   if (!providerConfig.connected()) {
@@ -101,7 +106,7 @@ export async function POST(
   }
 
   const messages = uiMessagesToClarise(payload.messages);
-  const extraction = await extractPlanWithCodex(repoKey, messages);
+  const extraction = await extractPlanWithCodex(repoKey, messages, modelProfile);
 
   const stream = createUIMessageStream<ClariseUIMessage>({
     execute: async ({ writer }) => {
@@ -131,6 +136,10 @@ export async function POST(
         });
       }
 
+      if (extraction.plan.artifactDrafts.length > 0) {
+        await ensureWorkspaceFiles(repoKey);
+      }
+
       for (const draft of extraction.plan.artifactDrafts) {
         writer.write({
           type: "data-tool_call",
@@ -143,7 +152,13 @@ export async function POST(
         });
 
         try {
-          const artifact = await createPrivateArtifact(repoKey, provider, draft, batchMilestoneId);
+          const artifact = await createPrivateArtifact(
+            repoKey,
+            provider,
+            modelProfile,
+            draft,
+            batchMilestoneId,
+          );
           if (draft.kind === "milestone") batchMilestoneId = artifact.id;
           createdCount += 1;
           writer.write({
@@ -191,16 +206,27 @@ export async function POST(
   });
 }
 
+async function ensureWorkspaceFiles(repoKey: string): Promise<void> {
+  const encodedRepoKey = encodeURIComponent(repoKey);
+  await serviceJson(`/api/repositories/${encodedRepoKey}/workspace/initialize`, {
+    method: "POST",
+  });
+  await serviceJson(`/api/repositories/${encodedRepoKey}/spec-workspace/initialize`, {
+    method: "POST",
+  });
+}
+
 async function extractPlanWithCodex(
   repoKey: string,
   messages: ClariseChatMessage[],
+  modelProfile: ClariseModelProfile,
 ): Promise<{ plan: ClarisePlan; fallbackReason?: string }> {
   try {
     const response = await serviceJson<ServiceExtractionResponse>(
       `/api/repositories/${encodeURIComponent(repoKey)}/clarise/extract`,
       {
         method: "POST",
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages, model_profile: modelProfile }),
       },
     );
     const plan = normalizeClarisePlan(response.plan);
@@ -218,9 +244,30 @@ async function extractPlanWithCodex(
 async function createPrivateArtifact(
   repoKey: string,
   provider: ClariseProviderId,
+  modelProfile: ClariseModelProfile,
   draft: ClariseArtifactDraft,
   batchMilestoneId?: string,
 ): Promise<ServiceArtifact> {
+  if (draft.kind === "codebase_map") {
+    const endpoint = `/api/repositories/${encodeURIComponent(
+      repoKey,
+    )}/spec-workspace/artifacts/codebase_map/codebase-map`;
+    const payload = await serviceJson<ServiceArtifactResponse>(endpoint, {
+      method: "PATCH",
+      body: JSON.stringify({
+        body: draft.body,
+        metadata: {
+          ...draft.metadata,
+          provider,
+          model_profile: modelProfile,
+          title: draft.title,
+        },
+      }),
+    });
+
+    return payload.artifact;
+  }
+
   if (draft.linkToBatchMilestone && !batchMilestoneId) {
     throw new Error("Parent milestone was not created.");
   }
@@ -235,6 +282,7 @@ async function createPrivateArtifact(
       body: JSON.stringify({
         ...draft.metadata,
         provider,
+        model_profile: modelProfile,
         related_milestone: relatedMilestone,
         title: draft.title,
         body: draft.body,
@@ -270,6 +318,8 @@ function messageContent(message: Record<string, unknown>): string {
 
 function endpointForKind(kind: ClariseArtifactDraft["kind"]): string {
   switch (kind) {
+    case "codebase_map":
+      return "artifacts/codebase_map";
     case "milestone":
       return "milestones";
     case "requirements":

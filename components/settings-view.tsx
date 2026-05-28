@@ -415,7 +415,12 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
         <button
           onClick={toggleAutomation}
           disabled={pending || automation == null}
-          className="shrink-0 rounded-[8px] border px-2.5 py-1 text-xs transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          className={cn(
+            "shrink-0 rounded-[8px] border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+            automation?.enabled
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15 dark:text-emerald-400"
+              : "hover:bg-accent",
+          )}
         >
           {pending ? "Updating..." : automation?.enabled ? "Disable" : "Enable"}
         </button>

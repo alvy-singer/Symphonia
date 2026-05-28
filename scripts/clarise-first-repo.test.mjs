@@ -39,6 +39,8 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
   assert.match(dashboard, /router\.push\(`\/r\/\$\{openedRepository\.key\.toLowerCase\(\)\}`\)/);
   assert.match(dashboard, /const href = `\/r\/\$\{repository\.key\.toLowerCase\(\)\}`/);
   assert.match(dashboard, /Ask Clarise/);
+  assert.match(dashboard, /Clarise creates the workspace files/);
+  assert.match(dashboard, /Use Clarise to create workspace files/);
   assert.doesNotMatch(dashboard, /openedRepository\.key\.toLowerCase\(\)\}\/tasks/);
 
   assert.match(sidebar, /label="Clarise"/);
@@ -52,17 +54,26 @@ test("Clarise home keeps chat private and exposes workspace result actions", asy
   const home = await source("components/clarise-repo-home.tsx");
 
   assert.match(home, /AssistantRuntimeProvider/);
-  assert.match(home, /useChatRuntime/);
+  assert.match(home, /useRemoteThreadListRuntime/);
+  assert.match(home, /useAISDKRuntime/);
   assert.match(home, /AssistantChatTransport/);
+  assert.match(home, /createSimpleTitleAdapter/);
+  assert.match(home, /FormattedLocalHistoryAdapter/);
+  assert.match(home, /withFormat/);
+  assert.match(home, /ThreadListPrimitive/);
   assert.match(home, /ComposerPrimitive/);
   assert.match(home, /symphonia\.clarise\.provider\.\$\{repoKey\}/);
+  assert.match(home, /symphonia\.clarise\.modelProfile\.\$\{repoKey\}/);
   assert.match(home, /codex_app_server/);
+  assert.match(home, /modelProfile/);
+  assert.match(home, /\/codebase/);
+  assert.match(home, /\/gsd-new-project/);
+  assert.match(home, /\/gsd-verify-work/);
   assert.match(home, /View in workspace/);
-  assert.match(home, /router\.push\(`\/r\/\$\{repoSlug\}\/workspace\?created=private`\)/);
+  assert.doesNotMatch(home, /workspace\?created=private/);
   assert.match(home, /Private/);
   assert.match(home, /\/milestone/);
   assert.match(home, /\/workflow/);
-  assert.doesNotMatch(home, /localStorage\.setItem\([^)]*messages/i);
 });
 
 test("Clarise chat route uses AI SDK streams and Codex extraction without prohibited writes", async () => {
@@ -74,6 +85,12 @@ test("Clarise chat route uses AI SDK streams and Codex extraction without prohib
   assert.match(route, /\/clarise\/extract/);
   assert.match(route, /data-artifact_result/);
   assert.match(route, /data-missing_fields/);
+  assert.match(route, /ensureWorkspaceFiles/);
+  assert.match(route, /\/workspace\/initialize/);
+  assert.match(route, /\/spec-workspace\/initialize/);
+  assert.match(route, /codebase_map/);
+  assert.match(route, /model_profile/);
+  assert.match(route, /modelProfile/);
   assert.match(route, /provider_not_connected/);
   assert.match(route, /create_private_artifact/);
   assert.match(service, /ArtifactExtractor\.extract/);
@@ -162,6 +179,7 @@ test("spec workspace supports private task brief artifacts", async () => {
   assert.match(http, /"requirements"/);
   assert.match(http, /"plans"/);
   assert.match(http, /"task-briefs"/);
-  assert.match(workspacePage, /SpecWorkspaceIndex/);
+  assert.doesNotMatch(workspacePage, /SpecWorkspaceIndex/);
+  assert.match(workspacePage, /notFound\(\)/);
   assert.match(workspaceIndex, /Private/);
 });

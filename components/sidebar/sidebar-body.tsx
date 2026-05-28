@@ -8,6 +8,7 @@ import {
   Hash,
   Inbox,
   KanbanSquare,
+  MessageCircle,
   Plus,
   Search,
   Settings,
@@ -190,15 +191,31 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
           <DocTree repoKey={repoKey} />
         </div>
 
+        <div>
+          <div className="mb-1 px-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            Team
+          </div>
+          <nav className="space-y-0.5">
+            <NavLink
+              to={`${base}/team/group-chat`}
+              label="Group chat"
+              icon={<MessageCircle className="h-3.5 w-3.5" />}
+              active={isActive(`${base}/team/group-chat`)}
+              onNavigate={handleNav}
+              title="Simulated team group chat"
+            />
+            <NavLink
+              to={`${base}/members`}
+              label="Members"
+              icon={<Users className="h-3.5 w-3.5" />}
+              active={isActive(`${base}/members`)}
+              onNavigate={handleNav}
+              title="People with access to this repository"
+            />
+          </nav>
+        </div>
+
         <nav className="space-y-0.5">
-          <NavLink
-            to={`${base}/members`}
-            label="Members"
-            icon={<Users className="h-3.5 w-3.5" />}
-            active={isActive(`${base}/members`)}
-            onNavigate={handleNav}
-            title="People with access to this repository"
-          />
           <NavLink
             to={`${base}/settings`}
             label="Settings"

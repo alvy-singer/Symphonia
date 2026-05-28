@@ -4,7 +4,10 @@ export type ClariseProviderId =
   | "gemini"
   | "cursor";
 
+export type ClariseModelProfile = "balanced" | "quality" | "budget";
+
 export type ClariseArtifactKind =
+  | "codebase_map"
   | "milestone"
   | "requirements"
   | "plan"
@@ -51,6 +54,7 @@ type ParsedDraft = {
 };
 
 const REQUIRED_FIELDS: Record<ClariseArtifactKind, string[]> = {
+  codebase_map: ["title"],
   milestone: ["title", "goal"],
   requirements: ["title", "requirement", "milestone"],
   plan: ["title", "plan", "milestone"],
@@ -61,6 +65,7 @@ const REQUIRED_FIELDS: Record<ClariseArtifactKind, string[]> = {
 const CHILD_KINDS = new Set<ClariseArtifactKind>(["requirements", "plan", "decision"]);
 
 const KIND_LABELS: Record<ClariseArtifactKind, string> = {
+  codebase_map: "codebase map",
   milestone: "milestone",
   requirements: "requirement",
   plan: "plan",
@@ -71,6 +76,11 @@ const KIND_LABELS: Record<ClariseArtifactKind, string> = {
 export function normalizeClariseProvider(value: unknown): ClariseProviderId {
   if (value === "claude_code" || value === "gemini" || value === "cursor") return value;
   return "codex_app_server";
+}
+
+export function normalizeClariseModelProfile(value: unknown): ClariseModelProfile {
+  if (value === "quality" || value === "budget") return value;
+  return "balanced";
 }
 
 export function planClariseResponse(messages: ClariseChatMessage[]): ClarisePlan {
@@ -98,7 +108,7 @@ export function planClariseResponse(messages: ClariseChatMessage[]): ClarisePlan
 
   return {
     assistantText:
-      "I can create private milestones, requirements, plans, decisions, and task briefs. Send the missing fields and I will save the artifact.",
+      "I can help run a GSD loop by creating private milestones, requirements, plans, decisions, and task briefs. Send a concrete goal or use a GSD command and I will save the right workspace artifacts.",
     artifactDrafts: [],
     missingFields: [],
   };
@@ -180,7 +190,7 @@ function parseBatchLines(prompt: string): ParsedDraft[] {
     .map((line) => line.trim())
     .flatMap((line): ParsedDraft[] => {
       const match = line.match(
-        /^(milestone|requirement|requirements|plan|decision|task\s*brief|task):\s*(.+)$/i,
+        /^(codebase|codebase\s*map|milestone|requirement|requirements|plan|decision|task\s*brief|task):\s*(.+)$/i,
       );
       if (!match) return [];
 
@@ -211,6 +221,7 @@ function parseBatchLines(prompt: string): ParsedDraft[] {
 
 function kindFromBatchLabel(label: string): ClariseArtifactKind {
   const normalized = label.toLowerCase().replace(/\s+/g, " ");
+  if (normalized === "codebase" || normalized === "codebase map") return "codebase_map";
   if (normalized === "decision") return "decision";
   if (normalized === "milestone") return "milestone";
   if (normalized === "requirement" || normalized === "requirements") return "requirements";
@@ -219,6 +230,7 @@ function kindFromBatchLabel(label: string): ClariseArtifactKind {
 }
 
 function requestedKind(prompt: string): ClariseArtifactKind | null {
+  if (prompt.includes("codebase")) return "codebase_map";
   if (prompt.includes("requirement")) return "requirements";
   if (prompt.includes("decision")) return "decision";
   if (prompt.includes("milestone")) return "milestone";
@@ -264,6 +276,33 @@ function toArtifactDraft(draft: ParsedDraft, hasBatchMilestone: boolean): Claris
     provider_created_at: now,
     related_milestone: parentMilestoneId,
   };
+
+  if (draft.kind === "codebase_map") {
+    return {
+      kind: "codebase_map",
+      title,
+      body: [
+        "# Codebase Map",
+        "",
+        "## Purpose",
+        draft.context?.trim() || "Clarise captured the first private codebase map for this repository.",
+        "",
+        "## Entry points",
+        "- Identify the primary app, service, and workspace entry points.",
+        "",
+        "## Important paths",
+        "- Add repository paths as the workspace is reviewed.",
+        "",
+        "## Data and state",
+        "- Capture durable workspace files, task files, and local/private run state boundaries.",
+        "",
+        "## Open questions",
+        "- Which areas should Clarise inspect before implementation work starts?",
+      ].join("\n"),
+      metadata,
+      confirmation: `Created private codebase map "${title}".`,
+    };
+  }
 
   if (draft.kind === "decision") {
     const decision = requiredString(draft.decision);
@@ -445,6 +484,7 @@ function normalizeMissingField(value: unknown): ClariseMissingField[] {
 function normalizeKind(value: unknown): ClariseArtifactKind | null {
   if (
     value === "milestone" ||
+    value === "codebase_map" ||
     value === "requirements" ||
     value === "plan" ||
     value === "decision" ||

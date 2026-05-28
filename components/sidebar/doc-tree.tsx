@@ -2,21 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import {
-  ChevronRight,
-  FileText,
-  GitBranch,
-  Plus,
-  ShieldCheck,
-  BookOpen,
-  Landmark,
-  ListChecks,
-  MessageSquareText,
-  Milestone,
-} from "lucide-react";
+import { usePathname } from "next/navigation";
+import { ChevronRight, GitBranch } from "lucide-react";
 import type {
-  SpecArtifact,
   SpecArtifactStatus,
   SpecArtifactSummary,
   SpecArtifactType,
@@ -29,16 +17,15 @@ interface Props {
   repoKey: string;
 }
 
-const SPEC_SECTION_ICONS: Record<string, typeof FileText> = {
-  Codebase: BookOpen,
-  Milestones: Milestone,
-  Discussions: MessageSquareText,
-  Requirements: ListChecks,
-  Plans: ShieldCheck,
-  "Task proposals": ListChecks,
-  "Task briefs": FileText,
-  Decisions: Landmark,
-};
+const WORKSPACE_GROUPS = [
+  { label: "Codebase", sectionLabels: ["Codebase"] },
+  {
+    label: "Milestone",
+    sectionLabels: ["Milestones", "Discussions", "Requirements", "Task proposals"],
+  },
+  { label: "Plans", sectionLabels: ["Plans"] },
+  { label: "Decisions", sectionLabels: ["Decisions"] },
+];
 
 const SPEC_TYPE_LABELS: Record<SpecArtifactType, string> = {
   codebase_map: "Codebase map",
@@ -71,7 +58,6 @@ const SPEC_STATUS_LABELS: Record<SpecArtifactStatus, string> = {
  * are a pinned root link.
  */
 export function DocTree({ repoKey }: Props) {
-  const router = useRouter();
   const pathname = usePathname();
   const slug = repoKey.toLowerCase();
   const [specWorkspace, setSpecWorkspace] = useState<SpecWorkspacePayload | null>(null);
@@ -138,31 +124,6 @@ export function DocTree({ repoKey }: Props) {
     }
   };
 
-  const createSpecArtifact = async (kind: "milestones" | "decisions") => {
-    setSpecPending(kind);
-    setSpecError(null);
-    try {
-      const res = await fetch(
-        `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/${kind}`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({}),
-        },
-      );
-      const payload = (await res.json()) as { artifact?: SpecArtifact; error?: string };
-      if (!res.ok || !payload.artifact) {
-        throw new Error(payload.error ?? "Could not create document");
-      }
-      await loadSpecWorkspace();
-      router.push(specArtifactHref(slug, payload.artifact));
-    } catch (err) {
-      setSpecError(err instanceof Error ? err.message : "Could not create document");
-    } finally {
-      setSpecPending(null);
-    }
-  };
-
   return (
     <div className="space-y-3 text-[13px]">
       {/* Repository rules are pinned, not a section. */}
@@ -183,27 +144,24 @@ export function DocTree({ repoKey }: Props) {
       )}
 
       {specWorkspace?.state.initialized ? (
-        specWorkspace.sections.map((section) => {
-          const Icon = SPEC_SECTION_ICONS[section.label] ?? FileText;
-          const onAdd =
-            section.label === "Milestones"
-              ? () => createSpecArtifact("milestones")
-              : section.label === "Decisions"
-                ? () => createSpecArtifact("decisions")
-                : undefined;
+        <div className="space-y-2">
+          {WORKSPACE_GROUPS.map((group) => {
+            const artifacts = group.sectionLabels.flatMap(
+              (label) =>
+                specWorkspace.sections.find((section) => section.label === label)?.artifacts ?? [],
+            );
 
-          return (
-            <SpecArtifactSection
-              key={section.label}
-              section={section}
-              icon={<Icon className="h-3.5 w-3.5" />}
-              repoSlug={slug}
-              currentPath={pathname}
-              onAdd={onAdd}
-              pending={specPending === "milestones" || specPending === "decisions"}
-            />
-          );
-        })
+            return (
+              <SpecArtifactSection
+                key={group.label}
+                label={group.label}
+                artifacts={artifacts}
+                repoSlug={slug}
+                currentPath={pathname}
+              />
+            );
+          })}
+        </div>
       ) : (
         <div className="rounded-md border border-dashed px-2 py-2">
           <p className="text-[11px] text-muted-foreground">Set up planning documents for this repository.</p>
@@ -222,73 +180,57 @@ export function DocTree({ repoKey }: Props) {
 }
 
 function SpecArtifactSection({
-  section,
-  icon,
+  label,
+  artifacts,
   repoSlug,
   currentPath,
-  onAdd,
-  pending,
 }: {
-  section: SpecWorkspaceSection;
-  icon: React.ReactNode;
+  label: string;
+  artifacts: SpecWorkspaceSection["artifacts"];
   repoSlug: string;
   currentPath: string;
-  onAdd?: () => void;
-  pending?: boolean;
 }) {
-  const [open, setOpen] = useState(true);
+  const hasActiveArtifact = artifacts.some(
+    (artifact) => currentPath === specArtifactHref(repoSlug, artifact),
+  );
+  const [open, setOpen] = useState(hasActiveArtifact);
+
+  useEffect(() => {
+    if (hasActiveArtifact) setOpen(true);
+  }, [hasActiveArtifact]);
+
+  if (artifacts.length === 0) return null;
 
   return (
-    <div>
-      <div className="group flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${section.label}`}
-          className="grid h-4 w-4 place-items-center rounded hover:bg-accent"
-        >
-          <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
-        </button>
-        <div className="flex flex-1 items-center gap-1.5 truncate">
-          {icon}
-          <span className="truncate">{section.label}</span>
-          {section.artifacts.length > 0 && (
-            <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/70">
-              {section.artifacts.length}
-            </span>
-          )}
-        </div>
-        {onAdd && (
-          <button
-            onClick={onAdd}
-            disabled={pending}
-            aria-label={`New ${section.label}`}
-            title={`New ${section.label.replace(/s$/, "")}`}
-            className="grid h-4 w-4 place-items-center rounded opacity-0 group-hover:opacity-100 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 text-muted-foreground hover:text-foreground"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
+    <section>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className={cn(
+          "flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground",
+          hasActiveArtifact && "text-foreground",
         )}
-      </div>
+      >
+        <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
+        <span className="flex-1 truncate">{label}</span>
+        <span className="text-[10px] tabular-nums text-muted-foreground/70">
+          {artifacts.length}
+        </span>
+      </button>
       {open && (
-        <ul className="ml-3 mt-0.5 border-l pl-1.5">
-          {section.artifacts.length === 0 ? (
-            <li className="px-2 py-1 text-[11px] text-muted-foreground/70">
-              Empty{onAdd ? " - click + to add one" : ""}
-            </li>
-          ) : (
-            section.artifacts.map((artifact) => (
-              <SpecArtifactNode
-                key={`${artifact.type}:${artifact.id}`}
-                artifact={artifact}
-                repoSlug={repoSlug}
-                active={currentPath === specArtifactHref(repoSlug, artifact)}
-              />
-            ))
-          )}
+        <ul className="mt-1 border-l pl-1.5">
+          {artifacts.map((artifact) => (
+            <SpecArtifactNode
+              key={`${artifact.type}:${artifact.id}`}
+              artifact={artifact}
+              repoSlug={repoSlug}
+              active={currentPath === specArtifactHref(repoSlug, artifact)}
+            />
+          ))}
         </ul>
       )}
-    </div>
+    </section>
   );
 }
 

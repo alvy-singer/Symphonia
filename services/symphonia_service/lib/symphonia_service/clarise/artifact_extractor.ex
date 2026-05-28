@@ -9,12 +9,13 @@ defmodule SymphoniaService.Clarise.ArtifactExtractor do
 
   alias SymphoniaService.CodingAssistant.AppServerClient
 
-  @kinds ~w(milestone requirements plan decision task_brief)
+  @kinds ~w(codebase_map milestone requirements plan decision task_brief)
 
   def extract(repository, payload \\ %{}) do
     messages = normalize_messages(Map.get(payload, "messages", []))
+    model_profile = normalize_model_profile(Map.get(payload, "model_profile"))
 
-    case AppServerClient.run_turn(repository["path"], prompt(messages),
+    case AppServerClient.run_turn(repository["path"], prompt(messages, model_profile),
            sandbox: "read-only",
            timeout_ms: timeout_ms()
          ) do
@@ -29,7 +30,7 @@ defmodule SymphoniaService.Clarise.ArtifactExtractor do
     end
   end
 
-  defp prompt(messages) do
+  defp prompt(messages, model_profile) do
     """
     You are Clarise, Symphonia's private planning assistant.
 
@@ -41,10 +42,10 @@ defmodule SymphoniaService.Clarise.ArtifactExtractor do
     JSON schema:
     {
       "assistantText": "short user-facing status text",
-      "missingFields": [{"kind": "milestone|requirements|plan|decision|task_brief", "field": "field_name"}],
+      "missingFields": [{"kind": "codebase_map|milestone|requirements|plan|decision|task_brief", "field": "field_name"}],
       "artifactDrafts": [
         {
-          "kind": "milestone|requirements|plan|decision|task_brief",
+          "kind": "codebase_map|milestone|requirements|plan|decision|task_brief",
           "title": "artifact title",
           "body": "complete markdown body",
           "metadata": {
@@ -62,11 +63,22 @@ defmodule SymphoniaService.Clarise.ArtifactExtractor do
     }
 
     Required fields:
+    - codebase_map: title
     - milestone: title, goal
     - requirements: title, requirement, milestone unless the same batch creates a milestone
     - plan: title, plan, milestone unless the same batch creates a milestone
     - decision: title, decision, milestone unless the same batch creates a milestone
     - task_brief: title, goal
+
+    Model profile: #{model_profile}
+    - budget: keep artifacts concise and prefer one focused next action.
+    - balanced: capture enough scope, acceptance criteria, and risks for a useful handoff.
+    - quality: include stronger validation, review, risk, and phase-handoff detail.
+
+    GSD parity target:
+    - Help the user move through discuss, plan, execute, verify, and ship loops.
+    - Prefer codebase_map, milestone, requirements, plan, decision, and task_brief artifacts that make the next action reviewable.
+    - Keep implementation work separate; never start a task run, pull request, or GitHub write from chat.
 
     If required fields are missing, return no artifactDrafts and list missingFields.
     Every artifact is private and must stay in Symphonia workspace artifacts only.
@@ -209,6 +221,9 @@ defmodule SymphoniaService.Clarise.ArtifactExtractor do
 
   defp normalize_messages(_messages), do: []
 
+  defp normalize_model_profile(profile) when profile in ["quality", "budget"], do: profile
+  defp normalize_model_profile(_profile), do: "balanced"
+
   defp assistant_text(artifact_drafts, _missing_fields) when length(artifact_drafts) > 1 do
     "Saving #{length(artifact_drafts)} private docs."
   end
@@ -223,7 +238,7 @@ defmodule SymphoniaService.Clarise.ArtifactExtractor do
   end
 
   defp assistant_text(_artifact_drafts, _missing_fields) do
-    "I can create private milestones, requirements, plans, decisions, and task briefs."
+    "I can help run a GSD loop by creating private codebase maps, milestones, requirements, plans, decisions, and task briefs."
   end
 
   defp string_attr(attrs, key) when is_map(attrs) do
