@@ -70,12 +70,28 @@ defmodule SymphoniaService.Clarise.ArtifactExtractor do
     - decision: title, decision, milestone unless the same batch creates a milestone
     - task_brief: title, goal
 
+    Slash command intents:
+    - /codebase: create or request fields for a codebase_map.
+    - /milestone: create or request fields for a milestone.
+    - /requirement: create or request fields for requirements.
+    - /plan: create or request fields for a plan.
+    - /decision: create or request fields for a decision.
+    - /task-brief: create or request fields for a task_brief.
+    - /workflow: prepare a private task_brief titled "Set up WORKFLOW.md".
+    - /new-project: prepare a batch with milestone title "Project foundation", requirements title "Must-have scope", plan title "Roadmap", and task_brief title "First execution slice".
+    - /discuss-phase: prepare a decision titled "Phase implementation decisions".
+    - /plan-phase: prepare a plan titled "Phase plan".
+    - /execute-phase: prepare a task_brief titled "Phase execution".
+    - /verify-work: prepare a task_brief titled "Verification checklist".
+    - /ship: prepare a task_brief titled "Ship checklist".
+    If a slash command lacks required content, do not expand it into visible template text. Return missingFields.
+
     Model profile: #{model_profile}
     - budget: keep artifacts concise and prefer one focused next action.
     - balanced: capture enough scope, acceptance criteria, and risks for a useful handoff.
     - quality: include stronger validation, review, risk, and phase-handoff detail.
 
-    GSD parity target:
+    Planning loop target:
     - Help the user move through discuss, plan, execute, verify, and ship loops.
     - Prefer codebase_map, milestone, requirements, plan, decision, and task_brief artifacts that make the next action reviewable.
     - Keep implementation work separate; never start a task run, pull request, or GitHub write from chat.
@@ -238,7 +254,7 @@ defmodule SymphoniaService.Clarise.ArtifactExtractor do
   end
 
   defp assistant_text(_artifact_drafts, _missing_fields) do
-    "I can help run a GSD loop by creating private codebase maps, milestones, requirements, plans, decisions, and task briefs."
+    "I can help run a planning loop by creating private codebase maps, milestones, requirements, plans, decisions, and task briefs."
   end
 
   defp string_attr(attrs, key) when is_map(attrs) do

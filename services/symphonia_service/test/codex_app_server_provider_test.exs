@@ -171,6 +171,8 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     task = wait_for_task_status(repository, task["key"], "in_review")
 
     assert run["provider"] == "codex_app_server"
+    assert run["kind"] == "daemon_assignment"
+    assert task["run"]["kind"] == "daemon_assignment"
     assert run["workspace_path"] == Path.join([workspaces_root, "sym", "sym-1"])
     assert run["codex_thread_id"] == "thread-fake"
     assert run["turn_id"] == "turn-fake"
@@ -230,6 +232,15 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert turn_start["params"]["approvalPolicy"] == "never"
     assert turn_start["params"]["cwd"] == run["workspace_path"]
 
+    [%{"text" => prompt}] = turn_start["params"]["input"]
+    assert prompt =~ "persistent task workspace"
+    assert prompt =~ "Task key: #{task["key"]}"
+    assert prompt =~ "WORKFLOW.md:"
+    assert prompt =~ "Review expectations:"
+    refute prompt =~ "thread-fake"
+    refute prompt =~ "turn-fake"
+    refute prompt =~ "turn/completed"
+
     review_blocked_task =
       TaskStore.patch_task(repository, task["key"], %{
         "frontmatter" => %{
@@ -276,10 +287,19 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     [task | _rest] = TaskStore.list_tasks(repository)
 
     assert {:ok, context} = LocalGitWorktreeProvider.prepare(repository, task, %{}, %{})
+    sentinel_path = Path.join(context.repo_path, ".symphonia-release-sentinel")
+    File.write!(sentinel_path, "preserved")
+
+    assert context.base_branch == "main"
+    assert context.head_branch == "symphonia/task/sym-1"
+    assert context.source_repo_path == repository["path"]
+    assert context.persistent == true
+    assert context.workspace_provider == "local_git_worktree"
     assert File.dir?(context.repo_path)
 
     assert :ok = LocalGitWorktreeProvider.release(context, %{})
     assert File.dir?(context.repo_path)
+    assert File.read!(sentinel_path) == "preserved"
   end
 
   test "created Markdown task can start a Codex App Server-backed run", %{
@@ -543,6 +563,16 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
 
     assert File.read!(Path.join(completed_run["workspace_path"], "app/app-server-output.txt")) =~
              "retry"
+  end
+
+  test "app-server provider delegates workspace preparation to the local provider" do
+    source =
+      Path.expand("../lib/symphonia_service/coding_assistant/app_server_provider.ex", __DIR__)
+      |> File.read!()
+
+    assert source =~ "LocalGitWorktreeProvider.prepare"
+    assert source =~ "LocalGitWorktreeProvider.release"
+    refute source =~ "with_persistent_task_branch_worktree"
   end
 
   test "completed app-server turn with no committable changes pauses the task", %{

@@ -69,10 +69,28 @@ defmodule SymphoniaService.ContextPackTest do
       "body" => "# Codex only\n\nHarness runs Codex App Server."
     })
 
+    task_body = """
+    # Implement always-on harness
+
+    Use existing daemon.
+
+    ## Review notes
+
+    Original feedback:
+    This raw reviewer complaint should stay out of the provider prompt.
+
+    Requested changes:
+    - Keep the stream observer bounded.
+
+    ## Handoff history
+
+    Older private handoff detail should not be replayed.
+    """
+
     task =
       TaskStore.create_task(registry_path, repository, %{
         "title" => "Implement always-on harness",
-        "body" => "# Implement always-on harness\n\nUse existing daemon.",
+        "body" => task_body,
         "source_milestone" => "milestone-approved",
         "source_requirements" => "requirements-1",
         "source_plan" => "plan-1",
@@ -80,23 +98,55 @@ defmodule SymphoniaService.ContextPackTest do
         "review_expectations" => ["Daemon dispatches one task."]
       })
 
-    RunStore.create(
+    run =
+      RunStore.create(
+        %{
+          "provider" => "codex_app_server",
+          "repository" => repository["key"],
+          "task" => task["key"],
+          "codex_thread_id" => "thread-private",
+          "turn_id" => "turn-private"
+        },
+        root: runs_root
+      )
+
+    RunStore.record_provider_output(
+      run,
       %{
-        "provider" => "codex_app_server",
-        "repository" => repository["key"],
-        "task" => task["key"],
-        "codex_thread_id" => "thread-private"
+        "app_server_events" => [
+          %{"method" => "agent/message/delta", "params" => %{"text" => "raw transcript secret"}}
+        ],
+        "turn" => %{"id" => "turn-private", "transcript" => "private turn transcript"}
       },
       root: runs_root
     )
 
-    %{repository: repository, task: TaskStore.get_task(repository, task["key"])}
+    task =
+      TaskStore.patch_task(repository, task["key"], %{
+        "frontmatter" => %{
+          "handoff" => %{
+            "summary" => "Previous handoff summary.",
+            "files_changed" => ["app/previous-output.txt"],
+            "head_branch" => "symphonia/task/sym-1",
+            "curated_summary_path" => "symphonia/run-summaries/sym-1.md"
+          },
+          "run" => %{
+            "codex_thread_id" => "thread-legacy",
+            "turn_id" => "turn-frontmatter-secret"
+          }
+        }
+      })
+
+    %{repository: repository, root: root, runs_root: runs_root, task: task}
   end
 
-  test "builds linked-only context and renders provider prompts from it", %{
-    repository: repository,
-    task: task
-  } do
+  test "builds linked context plus canonical codebase map and renders provider prompts from it",
+       %{
+         repository: repository,
+         root: root,
+         runs_root: runs_root,
+         task: task
+       } do
     context = %{
       base_branch: "main",
       head_branch: "symphonia/task/sym-1",
@@ -115,6 +165,10 @@ defmodule SymphoniaService.ContextPackTest do
     assert "decision-1" in artifact_ids
     refute "milestone-draft" in artifact_ids
     refute "plan-unlinked" in artifact_ids
+    assert pack["previousHandoff"]["summary"] == "Previous handoff summary."
+    assert "app/previous-output.txt" in pack["previousHandoff"]["filesChanged"]
+    assert pack["reviewNotes"] =~ "Requested changes:"
+    refute pack["reviewNotes"] =~ "raw reviewer complaint"
     assert pack["existingCodexThreadId"] == "thread-private"
 
     prompt =
@@ -133,7 +187,68 @@ defmodule SymphoniaService.ContextPackTest do
     assert prompt =~ "Harness plan"
     assert prompt =~ "Codex only"
     assert prompt =~ "Existing Codex thread ID: thread-private"
+    assert prompt =~ "Previous handoff:"
+    assert prompt =~ "Previous handoff summary."
+    assert prompt =~ "app/previous-output.txt"
+    assert prompt =~ "Review notes:"
+    assert prompt =~ "Requested changes:"
+    assert prompt =~ "- Keep the stream observer bounded."
+    assert prompt =~ repository["path"]
+
     refute prompt =~ "Unlinked plan"
+    refute prompt =~ "Draft milestone"
+    refute prompt =~ "raw reviewer complaint"
+    refute prompt =~ "Older private handoff detail"
+    refute prompt =~ "turn-private"
+    refute prompt =~ "turn-frontmatter-secret"
+    refute prompt =~ "raw transcript secret"
+    refute prompt =~ "private turn transcript"
+    refute prompt =~ runs_root
+    refute prompt =~ root <> "/runs"
+  end
+
+  test "app-server and legacy codex modes share the same ContextPack source", %{
+    repository: repository,
+    task: task
+  } do
+    context = %{
+      base_branch: "main",
+      head_branch: "symphonia/task/sym-1",
+      repo_path: repository["path"],
+      persistent: true,
+      workspace_provider: "local_git_worktree"
+    }
+
+    params = %{"assistant_input" => "Address review."}
+
+    app_server_prompt =
+      ContextPack.render_prompt(repository, task, context, params, mode: :app_server)
+
+    codex_prompt = ContextPack.render_prompt(repository, task, context, params, mode: :codex)
+
+    assert app_server_prompt =~ "persistent task workspace"
+    assert codex_prompt =~ "repository workspace"
+
+    for shared <- [
+          "Task key: #{task["key"]}",
+          "Continuation input:\nAddress review.",
+          "Codebase Map",
+          "Approved milestone",
+          "Harness requirements",
+          "Harness plan",
+          "Codex only",
+          "Previous handoff summary.",
+          "Review notes:",
+          "Existing Codex thread ID: thread-private"
+        ] do
+      assert app_server_prompt =~ shared
+      assert codex_prompt =~ shared
+    end
+
+    for private <- ["Unlinked plan", "Draft milestone", "turn-private", "raw transcript secret"] do
+      refute app_server_prompt =~ private
+      refute codex_prompt =~ private
+    end
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

@@ -18,6 +18,7 @@ defmodule SymphoniaService.RunStoreTest do
           "provider" => "codex_app_server",
           "repository" => "SYM",
           "task" => "SYM-1",
+          "kind" => "daemon_assignment",
           "workspace_path" => "/Users/example/private/workspace",
           "codex_thread_id" => "thread-secret",
           "turn_id" => "turn-secret"
@@ -37,6 +38,7 @@ defmodule SymphoniaService.RunStoreTest do
 
     public = RunStore.public(run)
 
+    assert public["kind"] == "daemon_assignment"
     refute Map.has_key?(public, "workspacePath")
     refute Map.has_key?(public, "codexThreadId")
     refute Map.has_key?(public, "turnId")

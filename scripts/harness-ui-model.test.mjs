@@ -23,12 +23,18 @@ const require = createRequire(import.meta.url);
 const {
   activeRunPollingTarget,
   automationLabel,
+  compactRunBadge,
   daemonLabel,
   harnessLabel,
   harnessStatusForTask,
+  isReviewReady,
   reviewHandoffForTask,
   runDisplayForTask,
+  runOriginLabel,
   runTimelineForTask,
+  safeReviewBranch,
+  safeSummaryPath,
+  terminalRunStateLabel,
 } = require(compiledPath);
 
 function task(attrs = {}) {
@@ -81,6 +87,57 @@ test("task badges expose eligibility reasons and active run states", () => {
     harnessStatusForTask(task({ run: { id: "run-1", state: "running", currentStep: "Executing" } })),
     { label: "Running", reason: "Executing", tone: "neutral" },
   );
+});
+
+test("run experience helpers derive public origin, state, and safe paths", () => {
+  assert.equal(runOriginLabel({ id: "run-1", kind: "assignment", state: "running" }), "Manual");
+  assert.equal(
+    runOriginLabel({ id: "run-1", kind: "daemon_assignment", state: "running" }),
+    "Harness",
+  );
+  assert.equal(
+    runOriginLabel({ id: "run-1", kind: "review_continuation", state: "running" }),
+    "Review continuation",
+  );
+  assert.equal(runOriginLabel({ id: "run-1", state: "running" }), "Unknown");
+
+  assert.deepEqual(compactRunBadge({ id: "run-1", state: "running" }), {
+    label: "Working",
+    tone: "neutral",
+  });
+  assert.deepEqual(
+    compactRunBadge({ id: "run-1", state: "running", displayStep: "Checking changes" }),
+    { label: "Checking changes", tone: "neutral" },
+  );
+  assert.deepEqual(compactRunBadge({ id: "run-1", state: "completed" }), {
+    label: "Ready for review",
+    tone: "ready",
+  });
+  assert.deepEqual(compactRunBadge({ id: "run-1", state: "failed" }), {
+    label: "Failed",
+    tone: "warning",
+  });
+  assert.deepEqual(compactRunBadge({ id: "run-1", state: "canceled" }), {
+    label: "Canceled",
+    tone: "warning",
+  });
+
+  assert.equal(terminalRunStateLabel({ id: "run-1", state: "completed" }), "Completed");
+  assert.equal(terminalRunStateLabel({ id: "run-1", state: "running" }), undefined);
+  assert.equal(
+    isReviewReady(
+      task({
+        status: "in_review",
+        handoff: { summary: "Ready", filesChanged: [] },
+      }),
+    ),
+    true,
+  );
+  assert.equal(isReviewReady(task({ status: "in_review", handoff: null })), false);
+  assert.equal(safeReviewBranch("symphonia/task/sym-1"), "symphonia/task/sym-1");
+  assert.equal(safeReviewBranch("/Users/example/private"), undefined);
+  assert.equal(safeSummaryPath("symphonia/run-summaries/sym-1.md"), "symphonia/run-summaries/sym-1.md");
+  assert.equal(safeSummaryPath("/Users/example/private/summary.md"), undefined);
 });
 
 test("blocked, in-review, polling, timeline, and handoff displays are derived without raw logs", () => {
@@ -194,14 +251,30 @@ test("blocked, in-review, polling, timeline, and handoff displays are derived wi
 
 test("task page copy separates Clarise planning from Codex implementation and hides raw run details", async () => {
   const taskPage = await readFile(new URL("../components/task-page.tsx", import.meta.url), "utf8");
+  const taskModel = await readFile(new URL("../lib/task-model.ts", import.meta.url), "utf8");
+  const runStore = await readFile(
+    new URL("../services/symphonia_service/lib/symphonia_service/coding_assistant/run_store.ex", import.meta.url),
+    "utf8",
+  );
 
+  assert.match(taskModel, /export type CodingAssistantRunKind/);
+  assert.match(taskModel, /kind\?: CodingAssistantRunKind/);
+  assert.match(runStore, /"kind" => run\["kind"\]/);
   assert.match(taskPage, /Ask Codex to work on this task/);
-  assert.match(taskPage, /Codex is working on this task/);
-  assert.match(taskPage, /Goal/);
-  assert.match(taskPage, /Context/);
+  assert.match(taskPage, /Codex is working/);
+  assert.match(taskPage, /Coding Assistant Run/);
+  assert.match(taskPage, /Review Handoff/);
+  assert.match(taskPage, /Origin/);
+  assert.match(taskPage, /Why it started/);
+  assert.match(taskPage, /Current state/);
+  assert.match(taskPage, /Review branch/);
+  assert.match(taskPage, /Curated summary/);
   assert.match(taskPage, /Proof needed/);
+  assert.match(taskPage, /Changed files/);
   assert.match(taskPage, /Validation evidence/);
   assert.match(taskPage, /Next action/);
+  assert.match(taskPage, /Codex is continuing the task/);
+  assert.match(taskPage, /Codex ran, but no reviewable files were produced/);
   assert.doesNotMatch(taskPage, /task\.run\.provider/);
   assert.doesNotMatch(taskPage, /task\.run\.workspacePath/);
   assert.doesNotMatch(taskPage, /task\.run\.codexThreadId/);

@@ -115,81 +115,80 @@ const SLASH_COMMANDS = [
   {
     command: "/codebase",
     label: "Codebase map",
+    description: "Create private codebase context.",
     icon: FileText,
-    prompt: "Create a codebase map\nTitle: Codebase map\nContext: ",
   },
   {
-    command: "/gsd-new-project",
+    command: "/new-project",
     label: "New project",
+    description: "Start a milestone, requirement, plan, and first task brief.",
     icon: Milestone,
-    prompt:
-      "Milestone: Project foundation | Goal: \nRequirement: Must-have scope | Requirement: \nPlan: Roadmap | Plan: \nTask brief: First execution slice | Goal: ",
   },
   {
-    command: "/gsd-discuss-phase",
+    command: "/discuss-phase",
     label: "Discuss phase",
+    description: "Capture phase decisions before implementation.",
     icon: MessageSquareText,
-    prompt: "Create a decision\nMilestone: \nTitle: Phase implementation decisions\nDecision: ",
   },
   {
-    command: "/gsd-plan-phase",
+    command: "/plan-phase",
     label: "Plan phase",
+    description: "Create a phase plan.",
     icon: ShieldCheck,
-    prompt: "Create a plan\nMilestone: \nTitle: Phase plan\nPlan: ",
   },
   {
-    command: "/gsd-execute-phase",
+    command: "/execute-phase",
     label: "Execute phase",
+    description: "Prepare an execution-ready task brief.",
     icon: ListChecks,
-    prompt: "Create an execution-ready task brief\nTitle: Phase execution\nGoal: ",
   },
   {
-    command: "/gsd-verify-work",
+    command: "/verify-work",
     label: "Verify work",
+    description: "Prepare a verification task brief.",
     icon: CheckCircle2,
-    prompt: "Create an execution-ready task brief\nTitle: Verification checklist\nGoal: ",
   },
   {
-    command: "/gsd-ship",
+    command: "/ship",
     label: "Ship phase",
+    description: "Prepare a ship checklist brief.",
     icon: ArrowRight,
-    prompt: "Create an execution-ready task brief\nTitle: Ship checklist\nGoal: ",
   },
   {
     command: "/milestone",
     label: "Milestone",
+    description: "Create a private milestone.",
     icon: Milestone,
-    prompt: "Create a milestone\nTitle: \nGoal: ",
   },
   {
     command: "/requirement",
     label: "Requirement",
+    description: "Create a private requirement.",
     icon: ListChecks,
-    prompt: "Create a requirement\nMilestone: \nTitle: \nRequirement: ",
   },
   {
     command: "/plan",
     label: "Plan",
+    description: "Create a private plan.",
     icon: FileText,
-    prompt: "Create a plan\nMilestone: \nTitle: \nPlan: ",
   },
   {
     command: "/decision",
     label: "Decision",
+    description: "Create a private decision.",
     icon: Landmark,
-    prompt: "Create a decision\nMilestone: \nTitle: \nDecision: ",
   },
   {
     command: "/task-brief",
     label: "Task brief",
+    description: "Create an execution-ready task brief.",
     icon: FileText,
-    prompt: "Create an execution-ready task brief\nTitle: \nGoal: ",
   },
   {
     command: "/workflow",
     label: "WORKFLOW.md",
+    description: "Prepare repository rules planning.",
     icon: ShieldCheck,
-    prompt: "Set up WORKFLOW.md",
   },
 ];
 
@@ -762,13 +761,13 @@ function ClariseMessage({ message }: { message: MessageState }) {
         )}
 
         {fallback && isFallbackPayload(fallback.data) && (
-          <div className="mt-3 rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
+          <div className="mt-3 border-l border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
             Codex extraction fell back to the deterministic parser: {fallback.data.reason}
           </div>
         )}
 
         {missingFields && isMissingFieldsPayload(missingFields.data) && (
-          <div className="mt-3 rounded-[8px] border bg-background/55 px-3 py-2 text-[12px] text-muted-foreground">
+          <div className="mt-3 border-l bg-background/55 px-3 py-2 text-[12px] text-muted-foreground">
             {missingFields.data.fields.map((field) => `${artifactLabel(field.kind)}: ${field.field}`).join("; ")}
           </div>
         )}
@@ -786,7 +785,7 @@ function ClariseMessage({ message }: { message: MessageState }) {
             {failures.map((failure) => (
               <div
                 key={`${failure.artifactKind}:${failure.title}`}
-                className="rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300"
+                className="border-l border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300"
               >
                 {failure.title}: {failure.error}
               </div>
@@ -801,13 +800,20 @@ function ClariseMessage({ message }: { message: MessageState }) {
 function ClariseComposer() {
   const composer = useComposerRuntime();
   const text = useComposer((state) => state.text);
-  const query = text.startsWith("/") ? text.slice(1).toLowerCase() : "";
-  const showMenu = text.startsWith("/");
+  const isSlashQuery = text.startsWith("/") && !/\s/.test(text);
+  const query = isSlashQuery ? text.slice(1).toLowerCase() : "";
+  const activeCommand = text.startsWith("/")
+    ? SLASH_COMMANDS.find(
+        (item) => text === item.command || text.startsWith(`${item.command} `),
+      )
+    : undefined;
+  const showMenu = isSlashQuery;
   const commands = SLASH_COMMANDS.filter((item) => {
     if (!query) return true;
     return (
       item.command.slice(1).includes(query) ||
-      item.label.toLowerCase().includes(query)
+      item.label.toLowerCase().includes(query) ||
+      item.description.toLowerCase().includes(query)
     );
   });
 
@@ -824,20 +830,32 @@ function ClariseComposer() {
                   type="button"
                   onMouseDown={(event) => {
                     event.preventDefault();
-                    composer.setText(item.prompt);
+                    composer.setText(`${item.command} `);
                   }}
                   className="flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left text-[13px] hover:bg-accent"
+                  aria-label={`Use ${item.command}`}
                 >
                   <span className="grid h-7 w-7 place-items-center rounded-[6px] bg-brand-accent-soft text-brand-accent-text">
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block font-medium text-foreground">{item.label}</span>
-                    <span className="block text-[12px] text-muted-foreground">{item.command}</span>
+                    <span className="block font-medium text-foreground">{item.command}</span>
+                    <span className="block text-[12px] text-muted-foreground">
+                      {item.description}
+                    </span>
                   </span>
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {activeCommand && (
+          <div className="mb-2 flex min-h-6 items-center gap-2 text-[12px]">
+            <span className="rounded-[5px] bg-brand-accent-soft px-2 py-1 font-medium text-brand-accent-text">
+              {activeCommand.command}
+            </span>
+            <span className="text-muted-foreground">{activeCommand.description}</span>
           </div>
         )}
 
@@ -863,9 +881,9 @@ function ClariseComposer() {
 
 function ArtifactCard({ artifact }: { artifact: ArtifactResult }) {
   return (
-    <div className="rounded-[8px] border bg-background/55 p-3">
+    <div className="border bg-background/55 p-3">
       <div className="flex items-start gap-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-brand-accent-soft text-brand-accent-text">
+        <span className="grid h-8 w-8 shrink-0 place-items-center bg-brand-accent-soft text-brand-accent-text">
           <FileText className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
@@ -880,7 +898,7 @@ function ArtifactCard({ artifact }: { artifact: ArtifactResult }) {
       </div>
       <Link
         href={artifact.href}
-        className="mt-3 inline-flex items-center gap-1 rounded-[8px] border px-3 py-1.5 text-[12px] font-medium hover:bg-accent"
+        className="mt-3 inline-flex items-center gap-1 border px-3 py-1.5 text-[12px] font-medium hover:bg-accent"
       >
         View in workspace
         <ArrowRight className="h-3.5 w-3.5" />

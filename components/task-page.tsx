@@ -11,7 +11,6 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
-import { PRIORITY_LABELS } from "@/data/mock";
 import {
   TASK_STATUS_LABELS,
   pausedReasonLabel,
@@ -23,15 +22,19 @@ import {
   type TaskLifecycleEvent,
 } from "@/lib/task-model";
 import { TaskStatusIcon } from "@/components/icons/task-status-icons";
-import { PriorityIcon } from "@/components/icons/status-icons";
 import { useClarise } from "@/components/clarise";
 import { cn } from "@/lib/utils";
 import {
   activeRunPollingTarget,
   isActiveRun,
+  isReviewReady,
   reviewHandoffForTask,
   runDisplayForTask,
+  runOriginLabel,
   runTimelineForTask,
+  safeReviewBranch,
+  safeSummaryPath,
+  terminalRunStateLabel,
 } from "@/lib/harness-ui-model";
 
 interface Props {
@@ -617,9 +620,9 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 
       {(pending === "coding_assistant_run" || activeRun) && (
         <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
-          <span>Codex is working on this task.</span>
+          <span>Codex is working</span>
           {activeRunDisplay.step && (
-            <span className="ml-2 text-foreground">{activeRunDisplay.step}</span>
+            <span className="ml-2 text-foreground">- {activeRunDisplay.step}</span>
           )}
         </div>
       )}
@@ -831,6 +834,13 @@ function TaskMeta({
   const handoff = reviewHandoffForTask(task);
   const timeline = runTimelineForTask(task, runEvents);
   const runDisplay = runDisplayForTask(task);
+  const run = task.run ?? null;
+  const terminalState = terminalRunStateLabel(run);
+  const reviewReady = isReviewReady(task);
+  const runBranch = safeReviewBranch(run?.reviewBranch ?? task.handoff?.headBranch);
+  const runSummaryPath = safeSummaryPath(run?.curatedSummaryPath ?? task.handoff?.curatedSummaryPath);
+  const allowedReason = run?.eligibilityReason ?? eligibility?.reason;
+  const recoveryMessage = recoveryMessageForTask(task);
 
   useEffect(() => {
     if (!handoff.summary) return;
@@ -842,184 +852,177 @@ function TaskMeta({
   }, [handoff.summary, repoKey, task.key]);
 
   return (
-    <div className="space-y-4">
-      <Section title="Status">
-        <div className="flex items-center gap-1.5">
-          <TaskStatusIcon status={task.status} />
-          <span>{TASK_STATUS_LABELS[task.status]}</span>
-        </div>
-      </Section>
-      <Section title="Goal">
-        <p className="text-muted-foreground">{task.title}</p>
-      </Section>
-      <Section title="Context">
-        <p className="text-muted-foreground">{taskContext(task)}</p>
-      </Section>
-      {task.pausedExplanation && (
-        <Section title="Paused reason">
-          <p className="text-muted-foreground">{task.pausedExplanation}</p>
-        </Section>
-      )}
-      <Section title="Priority">
-        <div className="flex items-center gap-1.5">
-          <PriorityIcon priority={task.priority} />
-          <span>{PRIORITY_LABELS[task.priority]}</span>
-        </div>
-      </Section>
-      <Section title="Project">
-        <span className="text-muted-foreground">{task.project ?? "No project"}</span>
-      </Section>
-      <Section title="Worker">
-        <div className="inline-flex items-center gap-1.5">
-          <Sparkles className="h-3 w-3 text-violet-500" />
-          <span>{task.run || task.handoff ? "Codex" : "Not assigned"}</span>
-        </div>
-      </Section>
-      <Section title="Automation">
-        {eligibility ? (
-          <div className="space-y-2">
-            <span
-              className={cn(
-                "inline-flex rounded-md border px-2 py-0.5",
-                eligibility.eligible
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                  : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-              )}
-            >
-              {eligibility.eligible ? "Eligible" : "Not eligible"}
-            </span>
-            <p className="text-muted-foreground">{eligibility.reason}</p>
+    <div className="space-y-5">
+      <Panel title="Coding Assistant Run">
+        <Section title="Task state">
+          <div className="flex items-center gap-1.5">
+            <TaskStatusIcon status={task.status} />
+            <span>{TASK_STATUS_LABELS[task.status]}</span>
           </div>
-        ) : (
-          <span className="text-muted-foreground">No eligibility check loaded</span>
-        )}
-      </Section>
-      {task.run && (
-        <Section title="Progress">
+        </Section>
+        <Section title="Origin">
+          <div className="inline-flex items-center gap-1.5">
+            <Sparkles className="h-3 w-3 text-violet-500" />
+            <span>{run ? runOriginLabel(run) : "Not assigned"}</span>
+          </div>
+        </Section>
+        <Section title="Why it started">
+          <p className="text-muted-foreground">
+            {allowedReason ?? "No run eligibility reason recorded"}
+          </p>
+        </Section>
+        <Section title="Current state">
           <div className="space-y-1 text-muted-foreground">
-            <p>{task.run.label ?? task.run.state}</p>
+            <p>{terminalState ?? run?.label ?? run?.state ?? "No run yet"}</p>
             {runDisplay.step && <p>{runDisplay.step}</p>}
             {runDisplay.message && <p>{runDisplay.message}</p>}
           </div>
         </Section>
-      )}
-      {timeline.length > 0 && (
-        <Section title="Progress timeline">
-          <ol className="space-y-2">
-            {timeline.map((event, index) => (
-              <li key={`${event.at ?? "event"}-${index}`} className="border-l pl-2">
-                <p>{event.label ?? "Run event"}</p>
-                <p className="font-mono text-[10px] text-muted-foreground">
-                  {event.at ?? "time not recorded"}
-                </p>
-              </li>
-            ))}
-          </ol>
-        </Section>
-      )}
-      <Section title="Proof needed">
-        {handoff.proofNeeded.length > 0 ? (
-          <ul className="space-y-1 text-muted-foreground">
-            {handoff.proofNeeded.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        ) : (
-          <span className="text-muted-foreground">No proof checklist recorded</span>
+        {recoveryMessage && (
+          <Section title="Recovery">
+            <p className="text-muted-foreground">{recoveryMessage}</p>
+          </Section>
         )}
-      </Section>
-      <Section id={handoff.summary ? "review-handoff-panel" : undefined} title="Handoff summary">
-        <span className="text-muted-foreground">{handoff.summary ?? "No handoff yet"}</span>
-      </Section>
-      {handoff.branch && (
-        <Section title="Branch">
-          <p className="font-mono text-[11px] text-muted-foreground">{handoff.branch}</p>
-        </Section>
-      )}
-      <Section title="Files changed">
-        {handoff.files.length > 0 ? (
-          <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
-            {handoff.files.map((file) => (
-              <li key={file}>{file}</li>
-            ))}
-          </ul>
-        ) : (
-          <span className="text-muted-foreground">No files recorded</span>
+        {runBranch && (
+          <Section title="Review branch">
+            <p className="font-mono text-[11px] text-muted-foreground">{runBranch}</p>
+          </Section>
         )}
-      </Section>
-      <Section title="Validation evidence">
-        {handoff.validationEvidence.length > 0 ? (
-          <ul className="space-y-2 text-muted-foreground">
-            {handoff.validationEvidence.map((item) => (
-              <li key={item.label} className="space-y-0.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span>{item.label}</span>
-                  <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", evidenceTone(item.status))}>
-                    {validationStatusLabel(item.status)}
-                  </span>
-                </div>
-                <p className="text-[11px]">{item.detail}</p>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <span className="text-muted-foreground">No validation evidence recorded</span>
+        {runSummaryPath && (
+          <Section title="Curated summary">
+            <p className="font-mono text-[11px] text-muted-foreground">{runSummaryPath}</p>
+          </Section>
         )}
-      </Section>
-      <Section title="Next action">
-        <span className="text-muted-foreground">
-          {handoff.nextReviewAction ?? "No review action recorded"}
-        </span>
-      </Section>
-      <Section title="GitHub issue">
-        {task.githubIssue ? (
-          <a
-            href={task.githubIssue}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
+        {timeline.length > 0 && (
+          <Section title="Public timeline">
+            <ol className="space-y-2">
+              {timeline.map((event, index) => (
+                <li key={`${event.at ?? "event"}-${index}`} className="border-l pl-2">
+                  <p>{event.label ?? "Run event"}</p>
+                  <p className="font-mono text-[10px] text-muted-foreground">
+                    {event.at ?? "time not recorded"}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          </Section>
+        )}
+      </Panel>
+
+      <Panel id={handoff.summary ? "review-handoff-panel" : undefined} title="Review Handoff">
+        <Section title="State">
+          <span
+            className={cn(
+              "inline-flex rounded-md border px-2 py-0.5",
+              reviewReady
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : "text-muted-foreground",
+            )}
           >
-            <Github className="h-3 w-3" />
-            <span>{task.githubIssueState ?? "linked"}</span>
-            <ExternalLink className="h-3 w-3 text-muted-foreground" />
-          </a>
-        ) : (
-          <span className="text-muted-foreground">Not linked</span>
+            {reviewReady ? "Ready for review" : "No handoff yet"}
+          </span>
+        </Section>
+        <Section title="Summary">
+          <span className="text-muted-foreground">{handoff.summary ?? "No handoff yet"}</span>
+        </Section>
+        {handoff.branch && (
+          <Section title="Branch">
+            <p className="font-mono text-[11px] text-muted-foreground">{handoff.branch}</p>
+          </Section>
         )}
-      </Section>
-      <Section title="Pull request">
-        {task.githubPr ? (
-          <a
-            href={task.githubPr}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
-          >
-            <GitPullRequest className="h-3 w-3" />
-            <span>{task.githubPrState ?? "linked"}</span>
-            <ExternalLink className="h-3 w-3 text-muted-foreground" />
-          </a>
-        ) : (
-          <span className="text-muted-foreground">No PR</span>
+        {handoff.curatedSummaryPath && (
+          <Section title="Curated summary">
+            <p className="font-mono text-[11px] text-muted-foreground">
+              {handoff.curatedSummaryPath}
+            </p>
+          </Section>
         )}
-      </Section>
-      <Section title="Repository record">
-        <p className="text-[11px] text-muted-foreground">Stored with this repository.</p>
-      </Section>
+        <Section title="Changed files">
+          {handoff.files.length > 0 ? (
+            <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
+              {handoff.files.map((file) => (
+                <li key={file}>{file}</li>
+              ))}
+            </ul>
+          ) : (
+            <span className="text-muted-foreground">No files recorded</span>
+          )}
+        </Section>
+        <Section title="Validation evidence">
+          {handoff.validationEvidence.length > 0 ? (
+            <ul className="space-y-2 text-muted-foreground">
+              {handoff.validationEvidence.map((item) => (
+                <li key={item.label} className="space-y-0.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>{item.label}</span>
+                    <span
+                      className={cn(
+                        "rounded border px-1.5 py-0.5 text-[10px]",
+                        evidenceTone(item.status),
+                      )}
+                    >
+                      {validationStatusLabel(item.status)}
+                    </span>
+                  </div>
+                  <p className="text-[11px]">{item.detail}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span className="text-muted-foreground">No validation evidence recorded</span>
+          )}
+        </Section>
+        <Section title="Proof needed">
+          {handoff.proofNeeded.length > 0 ? (
+            <ul className="space-y-1 text-muted-foreground">
+              {handoff.proofNeeded.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <span className="text-muted-foreground">No proof checklist recorded</span>
+          )}
+        </Section>
+        <Section title="Next action">
+          <span className="text-muted-foreground">
+            {handoff.nextReviewAction ?? "No review action recorded"}
+          </span>
+        </Section>
+        <Section title="GitHub issue">
+          {task.githubIssue ? (
+            <a
+              href={task.githubIssue}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
+            >
+              <Github className="h-3 w-3" />
+              <span>{task.githubIssueState ?? "linked"}</span>
+              <ExternalLink className="h-3 w-3 text-muted-foreground" />
+            </a>
+          ) : (
+            <span className="text-muted-foreground">Not linked</span>
+          )}
+        </Section>
+        <Section title="Pull request">
+          {task.githubPr ? (
+            <a
+              href={task.githubPr}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted"
+            >
+              <GitPullRequest className="h-3 w-3" />
+              <span>{task.githubPrState ?? "linked"}</span>
+              <ExternalLink className="h-3 w-3 text-muted-foreground" />
+            </a>
+          ) : (
+            <span className="text-muted-foreground">No PR</span>
+          )}
+        </Section>
+      </Panel>
     </div>
   );
-}
-
-function taskContext(task: ServiceTask): string {
-  const context = task.body
-    .split(/\n## (Review notes|Handoff history)\b/, 1)[0]
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .slice(0, 2)
-    .join(" ");
-
-  return context || "No additional context recorded.";
 }
 
 function validationStatusLabel(status: string): string {
@@ -1038,6 +1041,35 @@ function evidenceTone(status: string): string {
   }
 
   return "border-muted-foreground/20 bg-background text-muted-foreground";
+}
+
+function recoveryMessageForTask(task: ServiceTask): string | undefined {
+  if (task.run?.state === "canceled" || task.status === "canceled") {
+    return "Run canceled. The task is paused and can be retried.";
+  }
+
+  if (task.pausedReason === "blocked_by_setup") {
+    return "Codex setup is blocked. Fix setup, then retry.";
+  }
+
+  if (task.pausedReason === "waiting_for_user") {
+    return "Codex needs input before continuing.";
+  }
+
+  if (task.pausedReason === "run_failed") {
+    const explanation = task.pausedExplanation ?? "";
+
+    if (
+      /no reviewable files/i.test(explanation) ||
+      /did not produce any files/i.test(explanation)
+    ) {
+      return "Codex ran, but no reviewable files were produced. Clarify the task and retry.";
+    }
+
+    return "Codex could not produce a reviewable handoff. Edit the task brief or retry.";
+  }
+
+  return undefined;
 }
 
 function safeMessage(error: unknown, fallback: string): string {
@@ -1064,6 +1096,23 @@ function Section({
       </h3>
       <div className="mt-1">{children}</div>
     </div>
+  );
+}
+
+function Panel({
+  id,
+  title,
+  children,
+}: {
+  id?: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section id={id} className="border-b pb-4 last:border-b-0">
+      <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+      <div className="mt-3 space-y-3">{children}</div>
+    </section>
   );
 }
 

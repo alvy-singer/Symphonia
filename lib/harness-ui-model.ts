@@ -13,6 +13,11 @@ export interface HarnessStatusBadge {
   tone: "ready" | "warning" | "neutral";
 }
 
+export interface CompactRunBadge {
+  label: "Working" | "Checking changes" | "Ready for review" | "Failed" | "Canceled";
+  tone: "neutral" | "ready" | "warning";
+}
+
 export interface ReviewHandoffView {
   summary?: string;
   files: string[];
@@ -43,6 +48,45 @@ export function activeRunPollingTarget(task?: Pick<ServiceTask, "run"> | null): 
   return isActiveRun(task?.run) && task?.run?.id ? task.run.id : null;
 }
 
+export function runOriginLabel(run?: CodingAssistantRun | null): string {
+  switch (run?.kind) {
+    case "assignment":
+      return "Manual";
+    case "daemon_assignment":
+      return "Harness";
+    case "review_continuation":
+      return "Review continuation";
+    default:
+      return "Unknown";
+  }
+}
+
+export function compactRunBadge(run?: CodingAssistantRun | null): CompactRunBadge | null {
+  if (!run) return null;
+
+  if (run.state === "completed") return { label: "Ready for review", tone: "ready" };
+  if (run.state === "failed") return { label: "Failed", tone: "warning" };
+  if (run.state === "canceled") return { label: "Canceled", tone: "warning" };
+
+  const step = run.displayStep ?? run.currentStep ?? "";
+  if (step.includes("Checking") || step.includes("Detecting") || step.includes("Creating")) {
+    return { label: "Checking changes", tone: "neutral" };
+  }
+
+  return { label: "Working", tone: "neutral" };
+}
+
+export function terminalRunStateLabel(run?: CodingAssistantRun | null): string | undefined {
+  if (run?.state === "completed") return "Completed";
+  if (run?.state === "failed") return "Failed";
+  if (run?.state === "canceled") return "Canceled";
+  return undefined;
+}
+
+export function isReviewReady(task: ServiceTask): boolean {
+  return task.status === "in_review" && Boolean(task.handoff);
+}
+
 export function harnessStatusForTask(
   task: ServiceTask,
   eligibility?: TaskEligibilityExplanation,
@@ -58,7 +102,7 @@ export function harnessStatusForTask(
   if (task.status === "in_review") {
     return {
       label: "In review",
-      reason: task.handoff?.headBranch ?? task.run?.reviewBranch,
+      reason: safeReviewBranch(task.handoff?.headBranch ?? task.run?.reviewBranch),
       tone: "ready",
     };
   }
@@ -105,8 +149,10 @@ export function reviewHandoffForTask(task: ServiceTask): ReviewHandoffView {
   const nextReviewAction = redactUnsafeText(
     task.handoff?.nextReviewAction ?? task.nextReviewAction,
   );
-  const branch = task.handoff?.headBranch
-    ? `${task.handoff.headBranch} -> ${task.handoff.baseBranch ?? "main"}`
+  const headBranch = safeReviewBranch(task.handoff?.headBranch);
+  const baseBranch = safeReviewBranch(task.handoff?.baseBranch) ?? "main";
+  const branch = headBranch
+    ? `${headBranch} -> ${baseBranch}`
     : undefined;
 
   return {
@@ -114,7 +160,7 @@ export function reviewHandoffForTask(task: ServiceTask): ReviewHandoffView {
     files: files.filter(isReviewSafePath),
     nextReviewAction,
     branch,
-    curatedSummaryPath: safeReviewPath(task.handoff?.curatedSummaryPath),
+    curatedSummaryPath: safeSummaryPath(task.handoff?.curatedSummaryPath),
     validationEvidence: (task.handoff?.validationEvidence ?? []).map((item) => ({
       ...item,
       label: redactUnsafeText(item.label) ?? "",
@@ -152,7 +198,12 @@ function displayProgressStep(run: CodingAssistantRun): string | undefined {
   }
 }
 
-function safeReviewPath(path?: string): string | undefined {
+export function safeReviewBranch(branch?: string): string | undefined {
+  if (!branch || !isReviewSafePath(branch)) return undefined;
+  return branch;
+}
+
+export function safeSummaryPath(path?: string): string | undefined {
   return path && isReviewSafePath(path) ? path : undefined;
 }
 

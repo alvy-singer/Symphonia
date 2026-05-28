@@ -13,11 +13,8 @@ import {
 import { useRouter } from "next/navigation";
 import {
   Activity,
-  FileText,
   Folder,
   GitBranch,
-  KanbanSquare,
-  Layers,
   LayoutGrid,
   List as ListIcon,
   Plus,
@@ -27,7 +24,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { RepositorySummary } from "@/lib/repository-model";
-import { useDocs, type DocCategory, type DocPage } from "@/lib/docs-store";
+import type { DocCategory } from "@/lib/docs-store";
 import { cn } from "@/lib/utils";
 
 interface PaletteCtx {
@@ -79,7 +76,6 @@ export function CommandPaletteProvider({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
-  const { pages } = useDocs();
 
   const open = useCallback(() => setIsOpen(true), []);
 
@@ -150,6 +146,15 @@ export function CommandPaletteProvider({
       const s = slug(repoForActions);
       cmds.push(
         {
+          id: "nav-workflow",
+          label: "Repository rules",
+          hint: repoForActions,
+          group: "Navigate",
+          icon: <GitBranch className="h-3.5 w-3.5" />,
+          run: () => router.push(`/r/${s}/workflow`),
+          keywords: "workflow rules repository",
+        },
+        {
           id: "nav-clarise",
           label: "Clarise",
           hint: repoForActions,
@@ -157,31 +162,6 @@ export function CommandPaletteProvider({
           icon: <Sparkles className="h-3.5 w-3.5 text-violet-500" />,
           run: () => router.push(`/r/${s}`),
           keywords: "repo home chat planning",
-        },
-        {
-          id: "nav-tasks",
-          label: "Tasks",
-          hint: repoForActions,
-          group: "Navigate",
-          icon: <Layers className="h-3.5 w-3.5" />,
-          run: () => router.push(`/r/${s}/tasks`),
-          keywords: "overview board list",
-        },
-        {
-          id: "nav-projects",
-          label: "Projects",
-          hint: repoForActions,
-          group: "Navigate",
-          icon: <KanbanSquare className="h-3.5 w-3.5" />,
-          run: () => router.push(`/r/${s}/projects`),
-        },
-        {
-          id: "nav-docs",
-          label: "Docs",
-          hint: repoForActions,
-          group: "Navigate",
-          icon: <FileText className="h-3.5 w-3.5" />,
-          run: () => router.push(`/r/${s}/docs`),
         },
         {
           id: "nav-decisions",
@@ -206,15 +186,6 @@ export function CommandPaletteProvider({
           group: "Navigate",
           icon: <Activity className="h-3.5 w-3.5" />,
           run: () => router.push(`/r/${s}/run-summaries`),
-        },
-        {
-          id: "nav-workflow",
-          label: "Repository rules",
-          hint: repoForActions,
-          group: "Navigate",
-          icon: <GitBranch className="h-3.5 w-3.5" />,
-          run: () => router.push(`/r/${s}/workflow`),
-          keywords: "workflow rules repository",
         },
         {
           id: "create-task",
@@ -297,22 +268,8 @@ export function CommandPaletteProvider({
       );
     }
 
-    // Document pages — searchable.
-    pages.forEach((p) => {
-      cmds.push({
-        id: `page-${p.id}`,
-        label: p.title || "Untitled",
-        hint: p.path,
-        group: "Navigate",
-        icon: <span aria-hidden>{p.icon ?? "·"}</span>,
-        run: () => router.push(pageHref(p)),
-        keywords: `${p.repo} ${p.category}`,
-      });
-    });
-
     return cmds;
   }, [
-    pages,
     repoScope,
     repositories,
     router,
@@ -395,7 +352,7 @@ export function CommandPaletteProvider({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder="Search repositories, pages, or actions…"
+                placeholder="Search repositories or actions..."
                 aria-label="Command palette search"
                 className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
               />
@@ -466,24 +423,4 @@ export function CommandPaletteProvider({
       )}
     </Ctx.Provider>
   );
-}
-
-function pageHref(p: DocPage): string {
-  const slug = p.repo.toLowerCase();
-  switch (p.category) {
-    case "task":
-      return `/r/${slug}/tasks/${p.id}`;
-    case "project":
-      return `/r/${slug}/projects/${p.id}`;
-    case "doc":
-      return `/r/${slug}/docs/${p.id}`;
-    case "decision":
-      return `/r/${slug}/decisions/${p.id}`;
-    case "review":
-      return `/r/${slug}/reviews/${p.id}`;
-    case "run-summary":
-      return `/r/${slug}/run-summaries/${p.id}`;
-    case "workflow":
-      return `/r/${slug}/workflow`;
-  }
 }

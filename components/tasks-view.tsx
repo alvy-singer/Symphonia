@@ -22,10 +22,10 @@ import { useNewTask } from "@/components/new-task-dialog";
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport";
 import { cn } from "@/lib/utils";
 import {
+  compactRunBadge,
   harnessLabel,
   harnessStatusForTask,
   isActiveRun,
-  runDisplayForTask,
 } from "@/lib/harness-ui-model";
 import type { RepositoryAutomationState } from "@/lib/repository-model";
 import {
@@ -196,9 +196,8 @@ function TaskCard({
   eligibility?: TaskEligibilityExplanation;
 }) {
   const pausedReason = pausedReasonLabel(task.pausedReason);
-  const activeRun = task.run && isActiveRun(task.run) ? task.run : null;
   const harnessStatus = harnessStatusForTask(task, eligibility);
-  const activeRunDisplay = runDisplayForTask({ run: activeRun });
+  const runBadge = compactRunBadge(task.run);
   return (
     <article className="rounded-[10px] border bg-card p-2.5 text-card-foreground shadow-[var(--elevation-card)] transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-[var(--elevation-card-hover)]">
       <Link href={`/r/${repoSlug}/tasks/${encodeURIComponent(task.key)}`} className="block">
@@ -218,9 +217,14 @@ function TaskCard({
               PR Open
             </span>
           )}
-          {activeRun && (
-            <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-600 dark:text-sky-400">
-              {activeRunDisplay.step ?? activeRun.label ?? "Working"}
+          {runBadge && (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px]",
+                runBadgeToneClass(runBadge.tone),
+              )}
+            >
+              {runBadge.label}
             </span>
           )}
           {harnessStatus && (
@@ -273,9 +277,8 @@ function TaskRow({
   eligibility?: TaskEligibilityExplanation;
 }) {
   const pausedReason = pausedReasonLabel(task.pausedReason);
-  const activeRun = task.run && isActiveRun(task.run) ? task.run : null;
   const harnessStatus = harnessStatusForTask(task, eligibility);
-  const activeRunDisplay = runDisplayForTask({ run: activeRun });
+  const runBadge = compactRunBadge(task.run);
   return (
     <div className="grid grid-cols-[1.5rem_4.5rem_1fr_auto] items-center gap-3 border-b px-4 py-2 last:border-b-0 hover:bg-accent">
       <Link
@@ -300,9 +303,14 @@ function TaskRow({
             PR Open
           </span>
         )}
-        {activeRun && (
-          <span className="hidden md:inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-600 dark:text-sky-400">
-            {activeRunDisplay.step ?? activeRun.label ?? "Working"}
+        {runBadge && (
+          <span
+            className={cn(
+              "hidden rounded-full border px-1.5 py-0.5 text-[10px] md:inline-flex",
+              runBadgeToneClass(runBadge.tone),
+            )}
+          >
+            {runBadge.label}
           </span>
         )}
         {harnessStatus && (
@@ -838,4 +846,16 @@ function safeMessage(error: unknown, fallback: string): string {
   return message
     .replace(/(^|[\s(])\/(?:Users|private|tmp|var|Volumes|home|opt|usr)\/[^\s)]+/g, "$1[local path hidden]")
     .replace(/\b[A-Z][A-Z0-9_]*(TOKEN|SECRET|KEY|PASSWORD)=\S+/g, "[environment value hidden]");
+}
+
+function runBadgeToneClass(tone: "neutral" | "ready" | "warning"): string {
+  if (tone === "ready") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+  }
+
+  if (tone === "warning") {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
+
+  return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
 }

@@ -85,6 +85,7 @@ defmodule SymphoniaService.CodingAssistant.RunSupervisor do
   defp run_frontmatter(run) do
     %{
       "id" => run["id"],
+      "kind" => run["kind"],
       "state" => run["state"],
       "current_step" => run["current_step"],
       "message" => RunEvents.public_message(run),

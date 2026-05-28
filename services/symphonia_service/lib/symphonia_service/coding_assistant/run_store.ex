@@ -138,6 +138,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
   def public(run) do
     %{
       "id" => run["id"],
+      "kind" => run["kind"],
       "state" => run["state"],
       "provider" => run["provider"],
       "label" => RunEvents.label(run["state"]),

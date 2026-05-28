@@ -2,6 +2,7 @@ import { SERVICE_URL } from "@/lib/server/symphonia-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 interface RunProgressEvent {
   id: string;
@@ -16,6 +17,9 @@ interface RunProgressEvent {
 }
 
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled"]);
+const MAX_STREAM_SECONDS = 240;
+const POLL_INTERVAL_MS = 2000;
+const MAX_ATTEMPTS = Math.floor((MAX_STREAM_SECONDS * 1000) / POLL_INTERVAL_MS);
 
 export async function GET(
   request: Request,
@@ -34,7 +38,7 @@ export async function GET(
       try {
         send("retry: 3000\n\n");
 
-        for (let attempt = 0; attempt < 180 && !cancelled; attempt += 1) {
+        for (let attempt = 0; attempt < MAX_ATTEMPTS && !cancelled; attempt += 1) {
           const events = await fetchProgressEvents(repoKey, taskKey, runId, cursor);
           let sawTerminal = false;
 
@@ -48,7 +52,7 @@ export async function GET(
           if (sawTerminal) break;
 
           send(`: heartbeat ${new Date().toISOString()}\n\n`);
-          await sleep(2000);
+          await sleep(POLL_INTERVAL_MS);
         }
       } catch {
         send(": stream closed\n\n");

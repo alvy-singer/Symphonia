@@ -448,6 +448,7 @@ defmodule SymphoniaService.TaskStore do
   defp public_run(run) when is_map(run) do
     %{
       "id" => run["id"],
+      "kind" => run["kind"],
       "state" => run["state"],
       "label" => RunEvents.label(run["state"]),
       "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),

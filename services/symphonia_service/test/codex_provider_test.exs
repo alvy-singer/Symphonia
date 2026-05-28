@@ -155,6 +155,12 @@ defmodule SymphoniaService.CodexProviderTest do
     prompt = File.read!(prompt_file)
     assert prompt =~ "Task key: SYM-1"
     assert prompt =~ "Create a small output file."
+    assert prompt =~ "repository workspace"
+    assert prompt =~ "WORKFLOW.md:"
+    assert prompt =~ "Review expectations:"
+    refute prompt =~ "provider_output"
+    refute prompt =~ "turn_id"
+    refute prompt =~ "\"event\":\"done\""
 
     output =
       git_output!([

@@ -1,6 +1,7 @@
 defmodule SymphoniaService.CodingAssistant.ContextPack do
   @moduledoc """
-  Linked-only prompt context for Coding Assistant providers.
+  Linked-only prompt context for Coding Assistant providers, plus the canonical
+  repository codebase map when present.
 
   The context pack is the single source used by runnable providers to render
   task prompts. It intentionally keeps raw provider output out of repository

@@ -69,6 +69,7 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
         "run" =>
           %{
             "id" => run["id"],
+            "kind" => run["kind"],
             "state" => run["state"],
             "current_step" => run["current_step"],
             "message" => RunEvents.public_message(run),

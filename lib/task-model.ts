@@ -52,8 +52,14 @@ export interface GitHubTaskMetadata {
   };
 }
 
+export type CodingAssistantRunKind =
+  | "assignment"
+  | "daemon_assignment"
+  | "review_continuation";
+
 export interface CodingAssistantRun {
   id: string;
+  kind?: CodingAssistantRunKind;
   state: "queued" | "running" | "completed" | "failed" | "canceled" | string;
   provider?: string;
   label?: string;

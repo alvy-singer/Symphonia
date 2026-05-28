@@ -108,7 +108,7 @@ export function planClariseResponse(messages: ClariseChatMessage[]): ClarisePlan
 
   return {
     assistantText:
-      "I can help run a GSD loop by creating private milestones, requirements, plans, decisions, and task briefs. Send a concrete goal or use a GSD command and I will save the right workspace artifacts.",
+      "I can help run a planning loop by creating private milestones, requirements, plans, decisions, and task briefs. Send a concrete goal or use a slash command and I will save the right workspace artifacts.",
     artifactDrafts: [],
     missingFields: [],
   };
@@ -146,6 +146,9 @@ function latestUserMessage(messages: ClariseChatMessage[]): string {
 }
 
 function parseRequestedDrafts(prompt: string): ParsedDraft[] {
+  const slashCommand = parseSlashCommand(prompt);
+  if (slashCommand.length > 0) return slashCommand;
+
   const batch = parseBatchLines(prompt);
   if (batch.length > 0) return batch;
 
@@ -182,6 +185,181 @@ function parseRequestedDrafts(prompt: string): ParsedDraft[] {
       context: fieldValue(prompt, "context"),
     },
   ];
+}
+
+function parseSlashCommand(prompt: string): ParsedDraft[] {
+  const match = prompt.trim().match(/^(\/[a-z0-9:-]+)(?:\s+([\s\S]*))?$/i);
+  if (!match) return [];
+
+  const { command, details } = normalizeSlashInvocation(
+    match[1].toLowerCase(),
+    match[2]?.trim() ?? "",
+  );
+  const title = fieldValue(details, "title") ?? plainDetails(details);
+  const goal = fieldValue(details, "goal") ?? plainDetails(details);
+  const context = fieldValue(details, "context");
+  const milestone = fieldValue(details, "milestone");
+
+  if (command === "/codebase") {
+    return [
+      {
+        kind: "codebase_map",
+        title: title ?? "Codebase map",
+        context,
+      },
+    ];
+  }
+
+  if (command === "/milestone") {
+    return [{ kind: "milestone", title, goal, context }];
+  }
+
+  if (command === "/requirement" || command === "/requirements") {
+    return [
+      {
+        kind: "requirements",
+        title,
+        requirement: fieldValue(details, "requirement") ?? plainDetails(details),
+        milestone,
+        context,
+      },
+    ];
+  }
+
+  if (command === "/plan") {
+    return [
+      {
+        kind: "plan",
+        title,
+        plan: fieldValue(details, "plan") ?? plainDetails(details),
+        milestone,
+        context,
+      },
+    ];
+  }
+
+  if (command === "/decision") {
+    return [
+      {
+        kind: "decision",
+        title,
+        decision: fieldValue(details, "decision") ?? plainDetails(details),
+        milestone,
+        context,
+      },
+    ];
+  }
+
+  if (command === "/task-brief" || command === "/task") {
+    return [{ kind: "task_brief", title, goal, context }];
+  }
+
+  if (command === "/workflow") {
+    return [
+      {
+        kind: "task_brief",
+        title: fieldValue(details, "title") ?? "Set up WORKFLOW.md",
+        goal:
+          fieldValue(details, "goal") ??
+          plainDetails(details) ??
+          "Create a private planning brief for repository rules before any file write is proposed.",
+        context:
+          context ??
+          "Clarise v1 prepares private planning artifacts only; it does not write GitHub files.",
+      },
+    ];
+  }
+
+  if (command === "/new-project") {
+    return [
+      {
+        kind: "milestone",
+        title: fieldValue(details, "milestone") ?? "Project foundation",
+        goal,
+        context,
+      },
+      {
+        kind: "requirements",
+        title: fieldValue(details, "requirement title") ?? "Must-have scope",
+        requirement: fieldValue(details, "requirement"),
+        context,
+      },
+      {
+        kind: "plan",
+        title: fieldValue(details, "plan title") ?? "Roadmap",
+        plan: fieldValue(details, "plan"),
+        context,
+      },
+      {
+        kind: "task_brief",
+        title: fieldValue(details, "task title") ?? "First execution slice",
+        goal: fieldValue(details, "task goal") ?? fieldValue(details, "task brief"),
+        context,
+      },
+    ];
+  }
+
+  if (command === "/discuss-phase") {
+    return [
+      {
+        kind: "decision",
+        title: title ?? "Phase implementation decisions",
+        decision: fieldValue(details, "decision") ?? plainDetails(details),
+        milestone,
+        context,
+      },
+    ];
+  }
+
+  if (command === "/plan-phase") {
+    return [
+      {
+        kind: "plan",
+        title: title ?? "Phase plan",
+        plan: fieldValue(details, "plan") ?? plainDetails(details),
+        milestone,
+        context,
+      },
+    ];
+  }
+
+  if (command === "/execute-phase") {
+    return [
+      {
+        kind: "task_brief",
+        title: title ?? "Phase execution",
+        goal,
+        context,
+      },
+    ];
+  }
+
+  if (command === "/verify-work") {
+    return [
+      {
+        kind: "task_brief",
+        title: title ?? "Verification checklist",
+        goal,
+        context,
+      },
+    ];
+  }
+
+  if (command === "/ship") {
+    return [{ kind: "task_brief", title: title ?? "Ship checklist", goal, context }];
+  }
+
+  return [];
+}
+
+function normalizeSlashInvocation(
+  rawCommand: string,
+  rawDetails: string,
+): { command: string; details: string } {
+  return {
+    command: rawCommand.replace(/:/g, "-"),
+    details: rawDetails,
+  };
 }
 
 function parseBatchLines(prompt: string): ParsedDraft[] {
@@ -246,6 +424,12 @@ function fieldValue(prompt: string, field: string): string | undefined {
   const match = prompt.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*:\\s*(.+)`, "i"));
   const value = match?.[1]?.trim();
   return value || undefined;
+}
+
+function plainDetails(details: string): string | undefined {
+  const value = details.trim();
+  if (!value || /^[a-z][a-z ]*:/im.test(value)) return undefined;
+  return value;
 }
 
 function inlineTitle(prompt: string, kind: ClariseArtifactKind): string | undefined {

@@ -51,7 +51,14 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
   assert.match(sidebar, /symphonia\.doctreeOpen\.\$\{repoSlug\}/);
 
   assert.match(palette, /id: "nav-clarise"/);
+  assert.match(palette, /id: "nav-workflow"/);
+  assert.match(palette, /repositories\.forEach[\s\S]+id: "nav-workflow"[\s\S]+id: "nav-clarise"/);
   assert.match(palette, /router\.push\(`\/r\/\$\{slug\(r\.key\)\}`\)/);
+  assert.doesNotMatch(palette, /id: "nav-tasks"/);
+  assert.doesNotMatch(palette, /id: "nav-projects"/);
+  assert.doesNotMatch(palette, /id: "nav-docs"/);
+  assert.doesNotMatch(palette, /pages\.forEach/);
+  assert.doesNotMatch(palette, /Search repositories, pages, or actions/);
 });
 
 test("Clarise home keeps chat private and exposes workspace result actions", async () => {
@@ -71,13 +78,24 @@ test("Clarise home keeps chat private and exposes workspace result actions", asy
   assert.match(home, /codex_app_server/);
   assert.match(home, /modelProfile/);
   assert.match(home, /\/codebase/);
-  assert.match(home, /\/gsd-new-project/);
-  assert.match(home, /\/gsd-verify-work/);
+  assert.match(home, /\/new-project/);
+  assert.match(home, /\/verify-work/);
   assert.match(home, /View in workspace/);
   assert.doesNotMatch(home, /workspace\?created=private/);
   assert.match(home, /Private/);
   assert.match(home, /\/milestone/);
   assert.match(home, /\/workflow/);
+  assert.match(home, /description: "Start a milestone, requirement, plan, and first task brief."/);
+  assert.match(home, /composer\.setText\(`\$\{item\.command\} `\)/);
+  assert.doesNotMatch(home, /Milestone: Project foundation \| Goal:/);
+  assert.doesNotMatch(home, /Task brief: First execution slice \| Goal:/);
+  assert.doesNotMatch(home, new RegExp("g" + "sd", "i"));
+
+  const answerSurface = home.slice(
+    home.indexOf("function ClariseMessage"),
+    home.indexOf("function ClariseComposer"),
+  );
+  assert.doesNotMatch(answerSurface, /rounded-\[8px\]/);
 });
 
 test("Clarise chat route uses AI SDK streams and Codex extraction without prohibited writes", async () => {
@@ -104,6 +122,27 @@ test("Clarise chat route uses AI SDK streams and Codex extraction without prohib
   assert.doesNotMatch(route, /transcript/i);
 });
 
+test("run progress SSE stays bounded and off the task board", async () => {
+  const route = await source(
+    "app/api/repositories/[repoKey]/tasks/[taskKey]/runs/[runId]/events/route.ts",
+  );
+  const taskPage = await source("components/task-page.tsx");
+  const tasksView = await source("components/tasks-view.tsx");
+
+  assert.match(route, /export const maxDuration = 300/);
+  assert.match(route, /const MAX_STREAM_SECONDS = 240/);
+  assert.match(route, /const POLL_INTERVAL_MS = 2000/);
+  assert.match(route, /const MAX_ATTEMPTS = Math\.floor/);
+  assert.match(route, /attempt < MAX_ATTEMPTS/);
+  assert.doesNotMatch(route, /attempt < 180/);
+  assert.match(route, /last-event-id/);
+  assert.match(route, /retry: 3000/);
+
+  assert.match(taskPage, /new EventSource/);
+  assert.doesNotMatch(tasksView, /EventSource/);
+  assert.doesNotMatch(tasksView, /fetchCodingAssistantRunEvents/);
+});
+
 test("assistant-ui dependencies and React peer range are installed intentionally", async () => {
   const manifest = JSON.parse(await source("package.json"));
 
@@ -127,6 +166,13 @@ test("Clarise planner asks for missing fields and supports small schema-complete
   assert.deepEqual(
     missingPlan.missingFields.map((field) => `${field.kind}:${field.field}`).sort(),
     ["milestone:goal", "milestone:title"],
+  );
+
+  const slashCommandPlan = planClariseResponse([{ role: "user", content: "/new-project" }]);
+  assert.equal(slashCommandPlan.artifactDrafts.length, 0);
+  assert.deepEqual(
+    slashCommandPlan.missingFields.map((field) => `${field.kind}:${field.field}`).sort(),
+    ["milestone:goal", "plan:plan", "requirements:requirement", "task_brief:goal"],
   );
 
   const batchPlan = planClariseResponse([
