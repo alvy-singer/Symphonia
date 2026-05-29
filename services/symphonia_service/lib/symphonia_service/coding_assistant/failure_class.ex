@@ -38,6 +38,9 @@ defmodule SymphoniaService.CodingAssistant.FailureClass do
       Enum.any?([reason, public_message], &AppServerClient.setup_blocker?/1) ->
         "setup_blocked"
 
+      text =~ "can't start" and (text =~ "disabled" or text =~ "not supported") ->
+        "setup_blocked"
+
       text =~ "validation" and text =~ "failed" ->
         "validation_failed"
 

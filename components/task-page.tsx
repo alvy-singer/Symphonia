@@ -45,6 +45,7 @@ import {
   taskOperationalBadge,
   terminalRunStateLabel,
   validationSummaryLabel,
+  workspaceProviderLabel,
 } from "@/lib/harness-ui-model";
 
 interface Props {
@@ -990,6 +991,11 @@ function TaskMeta({
           <span>{run ? runOriginLabel(run) : "Not assigned"}</span>
         </div>
       </Section>
+      {run && (
+        <Section title="Workspace">
+          <span className="text-muted-foreground">{workspaceProviderLabel(run)}</span>
+        </Section>
+      )}
       <Section title="Why it started">
         <p className="text-muted-foreground">
           {allowedReason ?? "No run eligibility reason recorded"}

@@ -32,7 +32,9 @@ defmodule SymphoniaService.ProviderContractTest do
       )
 
     assert source =~ "ContextPack.render_prompt"
-    assert source =~ "LocalGitWorktreeProvider.prepare"
+    assert source =~ "WorkspaceProviders.prepare"
+    assert source =~ "WorkspaceProviders.review_context"
+    assert source =~ "ChangeApplier.apply"
     assert source =~ "RunStore.record_provider_output"
     assert source =~ "run_validation"
     assert source =~ "CuratedSummary.write!"

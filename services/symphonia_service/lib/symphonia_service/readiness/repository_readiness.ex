@@ -11,6 +11,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
   alias SymphoniaService.CodingAssistant.ProviderCatalog
   alias SymphoniaService.Harness.{Automation, Daemon}
   alias SymphoniaService.Readiness.RepositoryScanner
+  alias SymphoniaService.Runner.WorkspaceProviders
   alias SymphoniaService.Validation.Policy
   alias SymphoniaService.{SpecWorkspace, TaskStore, Workspace}
 
@@ -137,8 +138,29 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
           do: action("edit_workflow"),
           else: nil
         )
-      )
+      ),
+      workspace_isolation_check()
     ]
+  end
+
+  defp workspace_isolation_check do
+    status = WorkspaceProviders.workspace_isolation_status()
+    sandbox = status["experimentalSandbox"] || %{}
+
+    detail =
+      if sandbox["enabled"] == true do
+        "Local workspace is ready. Experimental sandbox is enabled for manual developer runs."
+      else
+        "Local workspace is ready. Experimental sandbox is disabled."
+      end
+
+    check(
+      "workspace_isolation",
+      "Workspace isolation",
+      "passed",
+      "workspace",
+      detail
+    )
   end
 
   defp planning_checks(repository) do

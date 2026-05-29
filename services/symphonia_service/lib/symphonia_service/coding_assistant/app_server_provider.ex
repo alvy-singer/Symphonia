@@ -19,7 +19,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
     RunStore
   }
 
-  alias SymphoniaService.Runner.LocalGitWorktreeProvider
+  alias SymphoniaService.Runner.{ChangeApplier, WorkspaceProviders}
   alias SymphoniaService.Validation.{Evidence, Policy, Runner}
 
   @impl true
@@ -76,11 +76,9 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
       with :ok <- AppServerClient.ensure_schema_bundle!(),
            :ok <- AppServerClient.ensure_daemon_ready!(app_server_opts(run, params)),
            :ok <- branch_preflight(repository, task) do
-        with {:ok, context} <- LocalGitWorktreeProvider.prepare(repository, task, run, params) do
-          RunStore.update_metadata(run, %{
-            "workspace_path" => context.repo_path,
-            "review_branch" => context.head_branch
-          })
+        with {:ok, context} <- WorkspaceProviders.prepare(repository, task, run, params) do
+          review_context = WorkspaceProviders.review_context(context)
+          record_workspace_metadata(run, context, review_context)
 
           try do
             prompt =
@@ -88,31 +86,31 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
 
             with {:ok, output} <-
                    invoke_app_server(repository, task["key"], run, context.repo_path, prompt),
-                 {:ok, changes} <- detect_and_clean_changes(run, context.repo_path),
+                 {:ok, changes} <- reviewable_changes(run, context, review_context),
                  :ok <- ensure_committable_changes(changes),
-                 {:ok, validation} <- run_validation(run, context.repo_path, task),
+                 {:ok, validation} <- run_validation(run, review_context.repo_path, task),
                  {:ok, summary_path} <-
                    write_summary(
                      run,
-                     context.repo_path,
+                     review_context.repo_path,
                      task,
                      changes,
                      output,
                      validation["public_evidence"]
                    ),
-                 :ok <- commit_and_push(run, context, task, changes, summary_path) do
+                 :ok <- commit_and_push(run, review_context, task, changes, summary_path) do
               files_changed = Enum.sort(changes["committable"] ++ [summary_path])
 
               handoff =
                 HandoffBuilder.build_from_changes(
                   task,
-                  context,
+                  review_context,
                   files_changed,
                   output["last_message"],
                   validation["public_evidence"]
                 )
-                |> Map.put("head_branch", context.head_branch)
-                |> Map.put("base_branch", context.base_branch)
+                |> Map.put("head_branch", review_context.head_branch)
+                |> Map.put("base_branch", review_context.base_branch)
                 |> Map.put("curated_summary_path", summary_path)
                 |> maybe_failed_validation_next_action(validation["results"])
 
@@ -121,7 +119,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
               {:error, reason} -> {:error, reason}
             end
           after
-            LocalGitWorktreeProvider.release(context, %{})
+            WorkspaceProviders.release(context, run)
           end
         end
       end
@@ -136,6 +134,37 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
   defp branch_preflight(repository, task) do
     BranchManager.ensure_repo_ready_for_task_branch!(repository, task)
     :ok
+  end
+
+  defp record_workspace_metadata(run, context, review_context) do
+    RunStore.update_metadata(run, %{
+      "workspace_path" => context.repo_path,
+      "workspace_provider" => context.workspace_provider || "local_git_worktree",
+      "review_branch" => review_context.head_branch
+    })
+
+    if context.workspace_provider == "experimental_sandbox" do
+      RunStore.record_provider_output(run, %{
+        "workspace" => %{
+          "workspace_provider" => "experimental_sandbox",
+          "sandbox" => private_workspace_metadata(context)
+        }
+      })
+    end
+
+    :ok
+  end
+
+  defp private_workspace_metadata(context) do
+    private = Map.get(context, :private, %{})
+
+    %{
+      "sandbox_id" => private[:sandbox_id],
+      "sandbox_path" => private[:sandbox_path],
+      "sandbox_events_path" => private[:sandbox_events_path]
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
   end
 
   defp invoke_app_server(repository, task_key, run, repo_path, prompt) do
@@ -221,6 +250,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
       "display_step" => RunEvents.display_step(run),
       "display_message" => RunEvents.display_message(run),
       "eligibility_reason" => run["eligibility_reason"],
+      "workspace_provider" => run["workspace_provider"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
       "started_at" => run["started_at"],
@@ -238,6 +268,31 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
     {:ok, changes}
   rescue
     error -> {:error, Exception.message(error)}
+  end
+
+  defp reviewable_changes(
+         run,
+         %{workspace_provider: "experimental_sandbox"} = context,
+         review_context
+       ) do
+    RunStore.mark_step(run, "Importing sandbox changes")
+    sandbox_changes = ChangeDetector.detect!(context.repo_path)
+    changed_paths = Enum.sort(sandbox_changes["committable"] ++ sandbox_changes["excluded"])
+
+    RunStore.record_provider_output(run, %{
+      "sandbox_change_detection" => sandbox_changes
+    })
+
+    with {:ok, _applied} <-
+           ChangeApplier.apply(context.repo_path, review_context.repo_path, changed_paths) do
+      detect_and_clean_changes(run, review_context.repo_path)
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp reviewable_changes(run, _context, review_context) do
+    detect_and_clean_changes(run, review_context.repo_path)
   end
 
   defp ensure_committable_changes(%{"committable" => []}) do

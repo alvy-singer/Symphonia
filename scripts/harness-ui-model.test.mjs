@@ -77,6 +77,7 @@ const {
   validationBadgeForTask,
   validationSummaryLabel,
   validationSummaryState,
+  workspaceProviderLabel,
 } = require(compiledPath);
 
 const {
@@ -177,6 +178,18 @@ test("run experience helpers derive public origin, state, and safe paths", () =>
     "Review continuation",
   );
   assert.equal(runOriginLabel({ id: "run-1", state: "running" }), "Unknown");
+  assert.equal(
+    workspaceProviderLabel({
+      id: "run-1",
+      state: "completed",
+      workspaceProvider: "experimental_sandbox",
+    }),
+    "Experimental sandbox",
+  );
+  assert.equal(
+    workspaceProviderLabel({ id: "run-1", state: "completed", workspaceProvider: "sandbox_123" }),
+    "Local workspace",
+  );
 
   assert.deepEqual(compactRunBadge({ id: "run-1", state: "running" }), {
     label: "Working",
@@ -545,6 +558,8 @@ test("task page copy separates Clarise planning from Codex implementation and hi
   assert.match(taskPage, /Review Decision/);
   assert.match(taskPage, /Pull Request/);
   assert.match(taskPage, /Origin/);
+  assert.match(taskPage, /Workspace/);
+  assert.match(taskPage, /workspaceProviderLabel/);
   assert.match(taskPage, /Why it started/);
   assert.match(taskPage, /Current state/);
   assert.match(taskPage, /Harness state/);
@@ -568,6 +583,7 @@ test("task page copy separates Clarise planning from Codex implementation and hi
   assert.match(taskPage, /Codex ran, but no reviewable files were produced/);
   assert.doesNotMatch(taskPage, /task\.run\.provider/);
   assert.doesNotMatch(taskPage, /task\.run\.workspacePath/);
+  assert.doesNotMatch(taskPage, /sandbox_id|sandboxPath|sandboxUrl|sandbox_events/);
   assert.doesNotMatch(taskPage, /task\.run\.codexThreadId/);
   assert.doesNotMatch(taskPage, /event\.threadId/);
   assert.doesNotMatch(taskPage, /event\.turnId/);
@@ -578,6 +594,10 @@ test("task board uses shared review gate helpers without opening SSE streams", a
   const settingsView = await readFile(new URL("../components/settings-view.tsx", import.meta.url), "utf8");
   const readinessView = await readFile(
     new URL("../components/repository-readiness.tsx", import.meta.url),
+    "utf8",
+  );
+  const repositoryReadiness = await readFile(
+    new URL("../services/symphonia_service/lib/symphonia_service/readiness/repository_readiness.ex", import.meta.url),
     "utf8",
   );
 
@@ -598,6 +618,7 @@ test("task board uses shared review gate helpers without opening SSE streams", a
   assert.match(settingsView, /Not runnable by Harness/);
   assert.match(readinessView, /Repository readiness/);
   assert.match(readinessView, /Scanner advisory/);
+  assert.match(repositoryReadiness, /workspace_isolation/);
   assert.doesNotMatch(readinessView, /workspacePath|codexThreadId|turnId|threadId|raw_log|provider_output/);
   assert.doesNotMatch(settingsView, /workspacePath|codexThreadId|turnId|threadId|raw_log|provider_output|transcript/);
 });

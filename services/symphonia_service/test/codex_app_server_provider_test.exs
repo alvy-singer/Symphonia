@@ -54,6 +54,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     previous_codex_bin = System.get_env("SYMPHONIA_CODEX_BIN")
     previous_app_server_bin = System.get_env("SYMPHONIA_CODEX_APP_SERVER_BIN")
     previous_startup_timeout = System.get_env("SYMPHONIA_CODEX_STARTUP_TIMEOUT_MS")
+    previous_workspace_provider = System.get_env("SYMPHONIA_WORKSPACE_PROVIDER")
+    previous_experimental_sandbox = System.get_env("SYMPHONIA_EXPERIMENTAL_SANDBOX_PROVIDER")
+    previous_sandboxes_root = System.get_env("SYMPHONIA_SANDBOXES_ROOT")
     previous_requests_file = System.get_env("FAKE_APP_SERVER_REQUESTS_FILE")
     previous_args_file = System.get_env("FAKE_APP_SERVER_ARGS_FILE")
     previous_fake_mode = System.get_env("FAKE_APP_SERVER_MODE")
@@ -66,6 +69,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     System.put_env("SYMPHONIA_WORKSPACES_ROOT", workspaces_root)
     System.put_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON", "true")
     System.put_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND", fake_app_server)
+    System.put_env("SYMPHONIA_SANDBOXES_ROOT", Path.join(root, "sandboxes"))
+    System.delete_env("SYMPHONIA_WORKSPACE_PROVIDER")
+    System.delete_env("SYMPHONIA_EXPERIMENTAL_SANDBOX_PROVIDER")
     System.put_env("FAKE_APP_SERVER_REQUESTS_FILE", requests_file)
     System.put_env("FAKE_APP_SERVER_ARGS_FILE", args_file)
 
@@ -84,6 +90,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
       restore_env("SYMPHONIA_CODEX_BIN", previous_codex_bin)
       restore_env("SYMPHONIA_CODEX_APP_SERVER_BIN", previous_app_server_bin)
       restore_env("SYMPHONIA_CODEX_STARTUP_TIMEOUT_MS", previous_startup_timeout)
+      restore_env("SYMPHONIA_WORKSPACE_PROVIDER", previous_workspace_provider)
+      restore_env("SYMPHONIA_EXPERIMENTAL_SANDBOX_PROVIDER", previous_experimental_sandbox)
+      restore_env("SYMPHONIA_SANDBOXES_ROOT", previous_sandboxes_root)
       restore_env("FAKE_APP_SERVER_REQUESTS_FILE", previous_requests_file)
       restore_env("FAKE_APP_SERVER_ARGS_FILE", previous_args_file)
       restore_env("FAKE_APP_SERVER_MODE", previous_fake_mode)
@@ -290,10 +299,13 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     runs_root: runs_root
   } do
     [task | _rest] = TaskStore.list_tasks(repository)
+    System.put_env("SYMPHONIA_EXPERIMENTAL_SANDBOX_PROVIDER", "1")
+    System.put_env("SYMPHONIA_WORKSPACE_PROVIDER", "experimental_sandbox")
 
     result =
       CodingAssistant.start_harness_run(registry_path, repository, task["key"], %{
         "provider" => "claude_code",
+        "workspace_provider" => "experimental_sandbox",
         "eligibility_reason" => "Provider lock invariant."
       })
 
@@ -301,6 +313,7 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
 
     assert result["run"]["provider"] == "codex_app_server"
     assert run["provider"] == "codex_app_server"
+    assert run["workspace_provider"] == "local_git_worktree"
     assert run["handoff"]["head_branch"] == "symphonia/task/sym-1"
   end
 
@@ -514,6 +527,98 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert :ok = LocalGitWorktreeProvider.release(context, %{})
     assert File.dir?(context.repo_path)
     assert File.read!(sentinel_path) == "preserved"
+  end
+
+  test "manual sandbox run imports changes into the local review workspace", %{
+    registry_path: registry_path,
+    remote_path: remote_path,
+    repository: repository,
+    requests_file: requests_file,
+    runs_root: runs_root,
+    workspaces_root: workspaces_root
+  } do
+    [task | _rest] = TaskStore.list_tasks(repository)
+    review_path = Path.join([workspaces_root, "sym", "sym-1"])
+
+    commit_workflow_validation!(
+      repository["path"],
+      "Review workspace validation",
+      ~s|case "$PWD" in */workspaces/sym/sym-1) test -f app/app-server-output.txt ;; *) exit 1 ;; esac|
+    )
+
+    System.put_env("SYMPHONIA_EXPERIMENTAL_SANDBOX_PROVIDER", "1")
+
+    result =
+      CodingAssistant.start_run(registry_path, repository, task["key"], %{
+        "workspace_provider" => "experimental_sandbox"
+      })
+
+    run = wait_for_run(runs_root, result["run"]["id"], "completed")
+    task = wait_for_task_status(repository, task["key"], "in_review")
+    public_run = CodingAssistant.get_run(repository, task["key"], run["id"])
+
+    assert run["workspace_provider"] == "experimental_sandbox"
+    assert run["workspace_path"] =~ "/sandboxes/"
+    assert run["workspace_path"] != review_path
+    refute File.exists?(run["workspace_path"])
+
+    assert public_run["workspaceProvider"] == "experimental_sandbox"
+    refute Map.has_key?(public_run, "workspacePath")
+    refute inspect(public_run) =~ "sandbox_"
+    refute inspect(public_run) =~ run["workspace_path"]
+
+    assert task["run"]["workspaceProvider"] == "experimental_sandbox"
+    assert task["handoff"]["headBranch"] == "symphonia/task/sym-1"
+    assert "app/app-server-output.txt" in task["handoff"]["filesChanged"]
+
+    assert File.read!(Path.join(review_path, "app/app-server-output.txt")) =~
+             "Fake App Server work product"
+
+    assert get_in(run, ["provider_output", "workspace", "sandbox", "sandbox_id"]) =~
+             "sandbox_sym-1"
+
+    assert get_in(run, ["provider_output", "sandbox_change_detection", "committable"]) == [
+             "app/app-server-output.txt"
+           ]
+
+    assert [
+             %{
+               "label" => "Review workspace validation",
+               "status" => "passed"
+             }
+           ] = get_in(run, ["provider_output", "validation", "results"])
+
+    requests = JSON.decode!(File.read!(requests_file))
+    turn_start = Enum.find(requests, &(&1["method"] == "turn/start"))
+    assert turn_start["params"]["cwd"] == run["workspace_path"]
+
+    [%{"text" => prompt}] = turn_start["params"]["input"]
+    assert prompt =~ "Workspace path: #{run["workspace_path"]}"
+    refute prompt =~ "Workspace path: #{review_path}"
+
+    branch_files =
+      git_output!([
+        "--git-dir",
+        remote_path,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "refs/heads/symphonia/task/sym-1"
+      ])
+
+    assert branch_files =~ "app/app-server-output.txt"
+    assert branch_files =~ run["curated_summary_path"]
+
+    summary =
+      git_output!([
+        "--git-dir",
+        remote_path,
+        "show",
+        "refs/heads/symphonia/task/sym-1:#{run["curated_summary_path"]}"
+      ])
+
+    refute summary =~ "sandbox_"
+    refute summary =~ run["workspace_path"]
   end
 
   test "created Markdown task can start a Codex App Server-backed run", %{
@@ -902,13 +1007,17 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
              "retry"
   end
 
-  test "app-server provider delegates workspace preparation to the local provider" do
+  test "app-server provider delegates workspace preparation to the workspace resolver" do
     source =
       Path.expand("../lib/symphonia_service/coding_assistant/app_server_provider.ex", __DIR__)
       |> File.read!()
 
-    assert source =~ "LocalGitWorktreeProvider.prepare"
-    assert source =~ "LocalGitWorktreeProvider.release"
+    assert source =~ "WorkspaceProviders.prepare"
+    assert source =~ "WorkspaceProviders.review_context"
+    assert source =~ "WorkspaceProviders.release"
+    assert source =~ "ChangeApplier.apply"
+    refute source =~ "LocalGitWorktreeProvider.prepare"
+    refute source =~ "LocalGitWorktreeProvider.release"
     refute source =~ "with_persistent_task_branch_worktree"
   end
 

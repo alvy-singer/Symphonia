@@ -456,6 +456,7 @@ defmodule SymphoniaService.TaskStore do
       "displayStep" => run["display_step"] || RunEvents.display_step(run),
       "displayMessage" => run["display_message"] || RunEvents.display_message(run),
       "eligibilityReason" => run["eligibility_reason"],
+      "workspaceProvider" => run["workspace_provider"],
       "reviewBranch" => run["review_branch"],
       "curatedSummaryPath" => run["curated_summary_path"],
       "retryAt" => run["retry_at"],

@@ -275,6 +275,7 @@ defmodule SymphoniaService.CodingAssistant do
       "display_step" => RunEvents.display_step(run),
       "display_message" => RunEvents.display_message(run),
       "eligibility_reason" => run["eligibility_reason"],
+      "workspace_provider" => run["workspace_provider"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],
       "retry_at" => run["retry_at"],

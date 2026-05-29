@@ -134,6 +134,18 @@ export function runOriginLabel(run?: CodingAssistantRun | null): string {
   }
 }
 
+export function workspaceProviderLabel(run?: CodingAssistantRun | null): string {
+  switch (run?.workspaceProvider) {
+    case "experimental_sandbox":
+      return "Experimental sandbox";
+    case "local_git_worktree":
+    case undefined:
+      return "Local workspace";
+    default:
+      return "Local workspace";
+  }
+}
+
 export function compactRunBadge(run?: CodingAssistantRun | null): CompactRunBadge | null {
   if (!run) return null;
 

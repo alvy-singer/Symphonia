@@ -149,9 +149,6 @@ export function DocTree({ repoKey }: Props) {
         active={pathname === `/r/${slug}/workflow`}
         icon={<GitBranch className="h-3.5 w-3.5" />}
         label="Repository rules"
-        right={
-          <span className="text-[10px] font-mono text-muted-foreground">root</span>
-        }
       />
 
       {specError && (
@@ -328,7 +325,6 @@ function SidebarLink({
   active,
   icon,
   label,
-  right,
   onClickAction,
   muted,
 }: {
@@ -336,7 +332,6 @@ function SidebarLink({
   active?: boolean;
   icon: React.ReactNode;
   label: string;
-  right?: React.ReactNode;
   onClickAction?: () => void;
   muted?: boolean;
 }) {
@@ -353,7 +348,6 @@ function SidebarLink({
       <button onClick={onClickAction} className={cn(className, "w-full text-left")}>
         {icon}
         <span className="flex-1 truncate">{label}</span>
-        {right}
       </button>
     );
   }
@@ -361,7 +355,6 @@ function SidebarLink({
     <Link href={href} className={className}>
       {icon}
       <span className="flex-1 truncate">{label}</span>
-      {right}
     </Link>
   );
 }

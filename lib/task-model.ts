@@ -67,6 +67,7 @@ export interface CodingAssistantRun {
   message?: string;
   displayStep?: string;
   displayMessage?: string;
+  workspaceProvider?: "local_git_worktree" | "experimental_sandbox" | string;
   workspacePath?: string;
   codexThreadId?: string;
   turnId?: string;
