@@ -2,12 +2,21 @@ import { NextResponse } from "next/server";
 
 export const SERVICE_URL = process.env.SYMPHONIA_SERVICE_URL ?? "http://127.0.0.1:4057";
 
+const ACTOR_HEADER_NAMES = [
+  "x-symphonia-actor",
+  "x-symphonia-actor-id",
+  "x-symphonia-role",
+] as const;
+
 export async function proxyToSymphoniaService(
   path: string,
   init: RequestInit = {},
+  request?: Request,
 ): Promise<NextResponse> {
   try {
     const headers = new Headers(init.headers);
+    forwardActorHeaders(headers, request);
+
     if (init.body && !headers.has("content-type")) {
       headers.set("content-type", "application/json");
     }
@@ -55,4 +64,13 @@ export async function serviceJson<T>(path: string, init: RequestInit = {}): Prom
   }
 
   return payload;
+}
+
+function forwardActorHeaders(headers: Headers, request?: Request): void {
+  if (!request) return;
+
+  for (const name of ACTOR_HEADER_NAMES) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
 }

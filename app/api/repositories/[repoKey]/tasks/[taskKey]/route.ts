@@ -23,5 +23,6 @@ export async function PATCH(
       method: "PATCH",
       body: await jsonBody(request),
     },
+    request,
   );
 }

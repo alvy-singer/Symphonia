@@ -26,6 +26,12 @@ import {
   readinessTone,
   type ReadinessTone,
 } from "@/lib/readiness-ui-model";
+import {
+  canAccess,
+  disabledReason,
+  type PermissionKey,
+  type RepositoryAccess,
+} from "@/lib/access-ui-model";
 import { cn } from "@/lib/utils";
 
 const CATEGORY_LABELS: Record<RepositoryReadinessCategory, string> = {
@@ -38,23 +44,43 @@ const CATEGORY_LABELS: Record<RepositoryReadinessCategory, string> = {
   review: "Review branches",
 };
 
-export function RepositoryReadinessCompact({ repoKey }: { repoKey: string }) {
-  return <RepositoryReadinessSurface repoKey={repoKey} variant="compact" />;
+export function RepositoryReadinessCompact({
+  repoKey,
+  access,
+}: {
+  repoKey: string;
+  access?: RepositoryAccess | null;
+}) {
+  return <RepositoryReadinessSurface repoKey={repoKey} access={access} variant="compact" />;
 }
 
-export function RepositoryReadinessDetails({ repoKey }: { repoKey: string }) {
-  return <RepositoryReadinessSurface repoKey={repoKey} variant="detailed" />;
+export function RepositoryReadinessDetails({
+  repoKey,
+  access,
+}: {
+  repoKey: string;
+  access?: RepositoryAccess | null;
+}) {
+  return <RepositoryReadinessSurface repoKey={repoKey} access={access} variant="detailed" />;
 }
 
-export function RepositoryReadinessTaskBanner({ repoKey }: { repoKey: string }) {
-  return <RepositoryReadinessSurface repoKey={repoKey} variant="banner" />;
+export function RepositoryReadinessTaskBanner({
+  repoKey,
+  access,
+}: {
+  repoKey: string;
+  access?: RepositoryAccess | null;
+}) {
+  return <RepositoryReadinessSurface repoKey={repoKey} access={access} variant="banner" />;
 }
 
 function RepositoryReadinessSurface({
   repoKey,
+  access,
   variant,
 }: {
   repoKey: string;
+  access?: RepositoryAccess | null;
   variant: "compact" | "detailed" | "banner";
 }) {
   const [readiness, setReadiness] = useState<RepositoryReadiness | null>(null);
@@ -120,6 +146,7 @@ function RepositoryReadinessSurface({
         loading={loading}
         error={error}
         pendingAction={pendingAction}
+        access={access}
         onAction={runAction}
       />
     );
@@ -132,6 +159,7 @@ function RepositoryReadinessSurface({
       loading={loading}
       error={error}
       pendingAction={pendingAction}
+      access={access}
       onAction={runAction}
     />
   ) : (
@@ -141,6 +169,7 @@ function RepositoryReadinessSurface({
       loading={loading}
       error={error}
       pendingAction={pendingAction}
+      access={access}
       onAction={runAction}
     />
   );
@@ -152,6 +181,7 @@ function CompactReadiness({
   loading,
   error,
   pendingAction,
+  access,
   onAction,
 }: ReadinessRenderProps) {
   const action = readiness ? readinessPrimaryAction(readiness) : null;
@@ -185,6 +215,7 @@ function CompactReadiness({
               repoKey={repoKey}
               action={action}
               pending={pendingAction === action.id}
+              access={access}
               onAction={onAction}
             />
           )}
@@ -200,6 +231,7 @@ function DetailedReadiness({
   loading,
   error,
   pendingAction,
+  access,
   onAction,
 }: ReadinessRenderProps) {
   const groups = readiness ? groupReadinessChecks(readiness.checks) : null;
@@ -228,6 +260,7 @@ function DetailedReadiness({
               repoKey={repoKey}
               action={action}
               pending={pendingAction === action.id}
+              access={access}
               onAction={onAction}
             />
           )}
@@ -247,6 +280,7 @@ function DetailedReadiness({
               label={CATEGORY_LABELS[category]}
               checks={groups[category]}
               pendingAction={pendingAction}
+              access={access}
               onAction={onAction}
             />
           ))}
@@ -281,6 +315,7 @@ function ReadinessBanner({
   loading,
   error,
   pendingAction,
+  access,
   onAction,
 }: ReadinessRenderProps) {
   const action = readiness ? readinessPrimaryAction(readiness) : null;
@@ -303,6 +338,7 @@ function ReadinessBanner({
             repoKey={repoKey}
             action={action}
             pending={pendingAction === action.id}
+            access={access}
             onAction={onAction}
           />
         )}
@@ -316,12 +352,14 @@ function ReadinessGroup({
   label,
   checks,
   pendingAction,
+  access,
   onAction,
 }: {
   repoKey: string;
   label: string;
   checks: RepositoryReadinessCheck[];
   pendingAction: string | null;
+  access?: RepositoryAccess | null;
   onAction: (action: RepositoryReadinessAction) => void;
 }) {
   if (checks.length === 0) return null;
@@ -344,6 +382,7 @@ function ReadinessGroup({
                 repoKey={repoKey}
                 action={check.action}
                 pending={pendingAction === check.action.id}
+                access={access}
                 onAction={onAction}
               />
             )}
@@ -358,11 +397,13 @@ function ActionControl({
   repoKey,
   action,
   pending,
+  access,
   onAction,
 }: {
   repoKey: string;
   action: RepositoryReadinessAction;
   pending: boolean;
+  access?: RepositoryAccess | null;
   onAction: (action: RepositoryReadinessAction) => void;
 }) {
   if (action.kind === "navigate" || action.kind === "connect") {
@@ -377,11 +418,18 @@ function ActionControl({
     );
   }
 
+  const permission = permissionForReadinessAction(action);
+  const blockedReason =
+    access && permission && !canAccess(access, permission)
+      ? setupDisabledReason(access, permission, action)
+      : undefined;
+
   return (
     <button
       type="button"
       onClick={() => onAction(action)}
-      disabled={pending}
+      disabled={pending || Boolean(blockedReason)}
+      title={blockedReason}
       className="inline-flex shrink-0 items-center gap-1.5 rounded-[8px] border bg-background px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
     >
       {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
@@ -492,5 +540,36 @@ type ReadinessRenderProps = {
   loading: boolean;
   error: string | null;
   pendingAction: string | null;
+  access?: RepositoryAccess | null;
   onAction: (action: RepositoryReadinessAction) => void;
 };
+
+function permissionForReadinessAction(
+  action: RepositoryReadinessAction,
+): PermissionKey | undefined {
+  switch (action.id) {
+    case "create_workflow":
+      return "workflow.update";
+    case "initialize_workspace":
+    case "initialize_spec_workspace":
+      return "workspace.initialize";
+    case "enable_automation":
+      return "automation.enable";
+    case "resume_harness":
+      return "harness.resume";
+    default:
+      return undefined;
+  }
+}
+
+function setupDisabledReason(
+  access: RepositoryAccess,
+  permission: PermissionKey,
+  action: RepositoryReadinessAction,
+): string {
+  if (permission === "workspace.initialize" || permission === "workflow.update") {
+    return `Ask an owner or maintainer to ${action.label.toLowerCase()}.`;
+  }
+
+  return disabledReason(access, permission) ?? "You do not have permission for this action.";
+}

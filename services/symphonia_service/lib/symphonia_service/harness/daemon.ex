@@ -6,6 +6,7 @@ defmodule SymphoniaService.Harness.Daemon do
   use GenServer
 
   alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore}
+  alias SymphoniaService.Access.{Actor, AuditLog}
   alias SymphoniaService.CodingAssistant.{BranchManager, ProviderCatalog, RunEvents, RunStore}
 
   alias SymphoniaService.Harness.{
@@ -372,6 +373,7 @@ defmodule SymphoniaService.Harness.Daemon do
       })
 
     run_id = result["run"]["id"]
+    audit_dispatch(state.registry_path, repository, task, result["run"], "harness.retry_dispatch")
 
     context
     |> Map.put(:claimed, claimed)
@@ -506,6 +508,7 @@ defmodule SymphoniaService.Harness.Daemon do
       })
 
     run_id = result["run"]["id"]
+    audit_dispatch(state.registry_path, repository, task, result["run"], "harness.dispatch")
 
     context
     |> Map.put(:claimed, claimed)
@@ -536,6 +539,23 @@ defmodule SymphoniaService.Harness.Daemon do
         "task" => task["key"],
         "message" => Exception.message(error)
       })
+  end
+
+  defp audit_dispatch(registry_path, repository, task, run, action) do
+    AuditLog.record(registry_path, repository, %{
+      "actor" => Actor.harness(),
+      "action" => action,
+      "target" => %{"type" => "task", "id" => task["key"]},
+      "result" => "completed",
+      "metadata" => %{
+        "runId" => run["id"],
+        "taskKey" => task["key"],
+        "provider" => run["provider"],
+        "workspaceProvider" => run["workspaceProvider"] || run["workspace_provider"]
+      }
+    })
+  rescue
+    _error -> :ok
   end
 
   defp retry_blocked_by_task?(task) do

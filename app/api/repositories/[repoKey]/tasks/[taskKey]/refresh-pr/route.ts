@@ -3,7 +3,7 @@ import { proxyToSymphoniaService } from "@/lib/server/symphonia-service";
 export const runtime = "nodejs";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ repoKey: string; taskKey: string }> },
 ) {
   const { repoKey, taskKey } = await params;
@@ -13,5 +13,6 @@ export async function POST(
       method: "POST",
       body: "{}",
     },
+    request,
   );
 }

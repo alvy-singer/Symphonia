@@ -47,6 +47,15 @@ import {
   validationSummaryLabel,
   workspaceProviderLabel,
 } from "@/lib/harness-ui-model";
+import {
+  auditResultLabel,
+  canAccess,
+  disabledReason,
+  formatAuditTime,
+  type AuditEvent,
+  type PermissionKey,
+  type RepositoryAccess,
+} from "@/lib/access-ui-model";
 
 interface Props {
   repoKey: string;
@@ -81,6 +90,27 @@ async function fetchEligibility(
     throw new Error(payload.error ?? "Could not load task eligibility");
   }
   return payload.eligibility;
+}
+
+async function fetchRepositoryAccess(repoKey: string): Promise<RepositoryAccess> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/access`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as RepositoryAccess & { error?: string };
+  if (!res.ok) throw new Error(payload.error ?? "Could not load repository access");
+  return payload;
+}
+
+async function fetchTaskAudit(repoKey: string, taskKey: string): Promise<AuditEvent[]> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
+      taskKey,
+    )}/audit?limit=20`,
+    { cache: "no-store" },
+  );
+  const payload = (await res.json()) as { events?: AuditEvent[]; error?: string };
+  if (!res.ok) throw new Error(payload.error ?? "Could not load task activity");
+  return payload.events ?? [];
 }
 
 async function patchTask(
@@ -349,6 +379,8 @@ type TaskAction =
 export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   const [task, setTask] = useState<ServiceTask | null>(null);
   const [eligibility, setEligibility] = useState<TaskEligibilityExplanation | null>(null);
+  const [access, setAccess] = useState<RepositoryAccess | null>(null);
+  const [taskAudit, setTaskAudit] = useState<AuditEvent[]>([]);
   const [runEvents, setRunEvents] = useState<CodingAssistantRunEvent[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -368,11 +400,18 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    Promise.all([fetchTask(repoKey, taskKey), fetchEligibility(repoKey, taskKey).catch(() => null)])
-      .then(([loaded, loadedEligibility]) => {
+    Promise.all([
+      fetchTask(repoKey, taskKey),
+      fetchEligibility(repoKey, taskKey).catch(() => null),
+      fetchRepositoryAccess(repoKey).catch(() => null),
+      fetchTaskAudit(repoKey, taskKey).catch(() => []),
+    ])
+      .then(([loaded, loadedEligibility, loadedAccess, loadedAudit]) => {
         if (cancelled) return;
         setTask(loaded);
         setEligibility(loadedEligibility);
+        setAccess(loadedAccess);
+        setTaskAudit(loadedAudit);
         setRunEvents(loaded.run?.timeline ?? []);
         setTitle(loaded.title);
         setBody(loaded.body);
@@ -516,6 +555,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setTitle(updated.title);
       setBody(updated.body);
       setDirty(false);
+      setTaskAudit(await fetchTaskAudit(repoKey, task.key).catch(() => taskAudit));
     } catch (err) {
       setError(safeMessage(err, "Could not save task"));
     } finally {
@@ -539,6 +579,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setTitle(updated.title);
       setBody(updated.body);
       setDirty(false);
+      setTaskAudit(await fetchTaskAudit(repoKey, task.key).catch(() => taskAudit));
     } catch (err) {
       setError(safeMessage(err, "Could not update task"));
     } finally {
@@ -603,6 +644,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       }
       setTask(updated);
       setEligibility(await fetchEligibility(repoKey, task.key).catch(() => eligibility));
+      setTaskAudit(await fetchTaskAudit(repoKey, task.key).catch(() => taskAudit));
       setRunEvents(updated.run?.timeline ?? runEvents);
       setTitle(updated.title);
       setBody(updated.body);
@@ -647,6 +689,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setDirty(false);
       setRequestBoxOpen(false);
       setFeedback("");
+      setTaskAudit(await fetchTaskAudit(repoKey, task.key).catch(() => taskAudit));
     } catch (err) {
       setNotice(null);
       setError(safeMessage(err, "Could not request changes"));
@@ -678,6 +721,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       setDirty(false);
       setOpenPrConfirmOpen(false);
       setNotice("Pull request opened. Symphonia will not merge it automatically.");
+      setTaskAudit(await fetchTaskAudit(repoKey, task.key).catch(() => taskAudit));
     } catch (err) {
       setError(safeMessage(err, "Could not open pull request"));
     } finally {
@@ -807,7 +851,8 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
                     key={action.kind === "event" ? action.event : action.kind}
                     id={action.kind === "coding_assistant_run" ? "ask-codex-button" : undefined}
                     onClick={() => runAction(action)}
-                    disabled={pending != null}
+                    disabled={pending != null || Boolean(taskActionDisabledReason(access, action))}
+                    title={taskActionDisabledReason(access, action)}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
                       action.primary && "bg-primary text-primary-foreground hover:opacity-90",
@@ -842,7 +887,13 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
               )}
               <button
                 onClick={save}
-                disabled={!dirty || pending != null || !title.trim()}
+                disabled={
+                  !dirty ||
+                  pending != null ||
+                  !title.trim() ||
+                  !canAccess(access, "task.update")
+                }
+                title={!canAccess(access, "task.update") ? disabledReason(access, "task.update") : undefined}
                 className="ml-auto rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pending === "save" ? "Saving…" : dirty ? "Save changes" : "Saved"}
@@ -897,7 +948,12 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
                   <button
                     type="button"
                     onClick={sendChanges}
-                    disabled={pending != null}
+                    disabled={pending != null || !canAccess(access, "review.request_changes")}
+                    title={
+                      !canAccess(access, "review.request_changes")
+                        ? disabledReason(access, "review.request_changes")
+                        : undefined
+                    }
                     className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
@@ -927,6 +983,8 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
             task={task}
             eligibility={eligibility}
             runEvents={runEvents}
+            access={access}
+            auditEvents={taskAudit}
             actions={availableActions}
             pending={pending}
             onAction={runAction}
@@ -942,6 +1000,8 @@ function TaskMeta({
   task,
   eligibility,
   runEvents,
+  access,
+  auditEvents,
   actions,
   pending,
   onAction,
@@ -950,6 +1010,8 @@ function TaskMeta({
   task: ServiceTask;
   eligibility: TaskEligibilityExplanation | null;
   runEvents: CodingAssistantRunEvent[];
+  access: RepositoryAccess | null;
+  auditEvents: AuditEvent[];
   actions: TaskAction[];
   pending: string | null;
   onAction: (action: TaskAction) => void;
@@ -1152,14 +1214,22 @@ function TaskMeta({
     <ReviewDecisionPanel
       task={task}
       actions={actions}
+      access={access}
       pending={pending}
       onAction={onAction}
     />
   );
 
   const pullRequestPanel = (
-    <PullRequestPanel task={task} actions={actions} pending={pending} onAction={onAction} />
+    <PullRequestPanel
+      task={task}
+      actions={actions}
+      access={access}
+      pending={pending}
+      onAction={onAction}
+    />
   );
+  const activityPanel = <TaskActivityPanel events={auditEvents} />;
 
   return (
     <div className="space-y-5">
@@ -1168,6 +1238,7 @@ function TaskMeta({
           {handoffPanel}
           {decisionPanel}
           {pullRequestPanel}
+          {activityPanel}
           {runPanel}
         </>
       ) : (
@@ -1176,6 +1247,7 @@ function TaskMeta({
           {handoffPanel}
           {decisionPanel}
           {pullRequestPanel}
+          {activityPanel}
         </>
       )}
     </div>
@@ -1185,11 +1257,13 @@ function TaskMeta({
 function ReviewDecisionPanel({
   task,
   actions,
+  access,
   pending,
   onAction,
 }: {
   task: ServiceTask;
   actions: TaskAction[];
+  access: RepositoryAccess | null;
   pending: string | null;
   onAction: (action: TaskAction) => void;
 }) {
@@ -1233,6 +1307,7 @@ function ReviewDecisionPanel({
             <TaskActionControl
               key={action.kind === "event" ? action.event : action.kind}
               action={action}
+              access={access}
               pending={pending}
               onAction={onAction}
             />
@@ -1252,11 +1327,13 @@ function ReviewDecisionPanel({
 function PullRequestPanel({
   task,
   actions,
+  access,
   pending,
   onAction,
 }: {
   task: ServiceTask;
   actions: TaskAction[];
+  access: RepositoryAccess | null;
   pending: string | null;
   onAction: (action: TaskAction) => void;
 }) {
@@ -1315,6 +1392,7 @@ function PullRequestPanel({
             <TaskActionControl
               key={action.kind === "view_pr" ? action.href : action.kind}
               action={action}
+              access={access}
               pending={pending}
               onAction={onAction}
             />
@@ -1327,10 +1405,12 @@ function PullRequestPanel({
 
 function TaskActionControl({
   action,
+  access,
   pending,
   onAction,
 }: {
   action: TaskAction;
+  access: RepositoryAccess | null;
   pending: string | null;
   onAction: (action: TaskAction) => void;
 }) {
@@ -1349,12 +1429,14 @@ function TaskActionControl({
   }
 
   const pendingKey = action.kind === "event" ? action.event : action.kind;
+  const blockedReason = taskActionDisabledReason(access, action);
 
   return (
     <button
       type="button"
       onClick={() => onAction(action)}
-      disabled={pending != null}
+      disabled={pending != null || Boolean(blockedReason)}
+      title={blockedReason}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
         action.primary && "bg-primary text-primary-foreground hover:opacity-90",
@@ -1363,6 +1445,32 @@ function TaskActionControl({
       {action.icon}
       {pending === pendingKey ? "Working..." : action.label}
     </button>
+  );
+}
+
+function TaskActivityPanel({ events }: { events: AuditEvent[] }) {
+  return (
+    <Panel title="Task Activity">
+      {events.length > 0 ? (
+        <ol className="space-y-3">
+          {events.slice(0, 8).map((event) => (
+            <li key={event.id} className="border-l pl-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span>{event.summary}</span>
+                <span className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {auditResultLabel(event.result)}
+                </span>
+              </div>
+              <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                {formatAuditTime(event.at)}
+              </p>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <span className="text-muted-foreground">No task activity recorded yet</span>
+      )}
+    </Panel>
   );
 }
 
@@ -1454,6 +1562,28 @@ function openPullRequestDetails(task: ServiceTask, handoff: ReturnType<typeof re
     curatedSummaryPath: handoff.curatedSummaryPath ?? "Not recorded",
     linkedIssue,
   };
+}
+
+function taskActionPermission(action: TaskAction): PermissionKey | undefined {
+  if (action.kind === "view_pr") return undefined;
+  if (action.kind === "coding_assistant_run") return "task.run_codex";
+  if (action.kind === "cancel_run") return "task.cancel_run";
+  if (action.kind === "open_pull_request") return "pull_request.open";
+  if (action.kind === "refresh_pr") return "pull_request.refresh";
+  if (action.kind === "request_changes") return "review.request_changes";
+  if (action.kind === "event" && action.event === "approve") return "review.approve";
+  if (action.kind === "event" && action.event === "cancel") return "task.cancel";
+  if (action.kind === "event") return "task.update";
+  return undefined;
+}
+
+function taskActionDisabledReason(
+  access: RepositoryAccess | null,
+  action: TaskAction,
+): string | undefined {
+  const permission = taskActionPermission(action);
+  if (!permission || canAccess(access, permission)) return undefined;
+  return disabledReason(access, permission);
 }
 
 function validationStatusLabel(status: string): string {

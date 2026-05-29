@@ -23,6 +23,7 @@ export async function PATCH(
       method: "PATCH",
       body: await jsonBody(request),
     },
+    request,
   );
 }
 
@@ -37,5 +38,6 @@ export async function DELETE(
       pageId,
     )}${url.search}`,
     { method: "DELETE" },
+    request,
   );
 }

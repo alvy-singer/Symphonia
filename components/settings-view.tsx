@@ -22,6 +22,16 @@ import {
   type HarnessDecision,
 } from "@/lib/harness-ui-model";
 import {
+  auditResultLabel,
+  canAccess,
+  disabledReason,
+  formatAuditTime,
+  permissionSummary,
+  roleLabel,
+  type AuditEvent,
+  type RepositoryAccess,
+} from "@/lib/access-ui-model";
+import {
   canHarnessRunProvider,
   providerMissingCapabilityLabels,
   providerStatusLabel,
@@ -74,6 +84,8 @@ const sections: { id: SectionId; label: string; icon: typeof UserIcon }[] = [
 
 export function SettingsView({ repoKey }: { repoKey: string }) {
   const [active, setActive] = useState<SectionId>("automation");
+  const [access, setAccess] = useState<RepositoryAccess | null>(null);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [name, setName] = useState("Ava Martinez");
   const [email, setEmail] = useState("ava@symphonia.app");
   const [bio, setBio] = useState("Design lead, building calmer software.");
@@ -84,6 +96,26 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
     weekly: false,
     marketing: false,
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchRepositoryAccess(repoKey), fetchRepositoryAudit(repoKey)])
+      .then(([nextAccess, nextEvents]) => {
+        if (cancelled) return;
+        setAccess(nextAccess);
+        setAuditEvents(nextEvents);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAccess(null);
+          setAuditEvents([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [repoKey]);
 
   return (
     <div className="flex h-full flex-col">
@@ -289,9 +321,11 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
               title="Automation"
               description="Control local-first Codex execution for this repository."
             >
-              <AutomationIntegration repoKey={repoKey} />
-              <RepositoryReadinessDetails repoKey={repoKey} />
-              <HarnessPanel />
+              <AccessPanel access={access} />
+              <AutomationIntegration repoKey={repoKey} access={access} />
+              <RepositoryReadinessDetails repoKey={repoKey} access={access} />
+              <HarnessPanel repoKey={repoKey} access={access} />
+              <ActivityPanel events={auditEvents} />
             </Section>
           )}
 
@@ -355,6 +389,24 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
       </div>
     </div>
   );
+}
+
+async function fetchRepositoryAccess(repoKey: string): Promise<RepositoryAccess> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/access`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as RepositoryAccess & { error?: string };
+  if (!res.ok) throw new Error(payload.error ?? "Could not load repository access");
+  return payload;
+}
+
+async function fetchRepositoryAudit(repoKey: string): Promise<AuditEvent[]> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/audit?limit=20`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { events?: AuditEvent[]; error?: string };
+  if (!res.ok) throw new Error(payload.error ?? "Could not load activity");
+  return payload.events ?? [];
 }
 
 async function fetchGitHubConnection(): Promise<GitHubConnectionState> {
@@ -451,8 +503,14 @@ async function fetchHarnessStatus(): Promise<HarnessStatus> {
   return payload.harness;
 }
 
-async function postHarnessAction(action: "pause" | "resume" | "tick" | "reconcile"): Promise<HarnessStatus> {
-  const res = await fetch(`/api/harness/${action}`, { method: "POST", cache: "no-store" });
+async function postHarnessAction(
+  repoKey: string,
+  action: "pause" | "resume" | "tick" | "reconcile",
+): Promise<HarnessStatus> {
+  const res = await fetch(`/api/harness/${action}?repoKey=${encodeURIComponent(repoKey)}`, {
+    method: "POST",
+    cache: "no-store",
+  });
   const payload = (await res.json()) as { harness?: HarnessStatus; error?: string } & HarnessStatus;
   const harness = payload.harness ?? payload;
   if (!res.ok || !harness) {
@@ -461,7 +519,99 @@ async function postHarnessAction(action: "pause" | "resume" | "tick" | "reconcil
   return harness;
 }
 
-function AutomationIntegration({ repoKey }: { repoKey: string }) {
+function AccessPanel({ access }: { access: RepositoryAccess | null }) {
+  const permissions = access?.permissions ?? {};
+  const highlighted = [
+    "task.run_codex",
+    "review.approve",
+    "pull_request.open",
+    "harness.pause",
+    "automation.enable",
+  ] as const;
+
+  return (
+    <div className="rounded-[10px] border bg-card shadow-[var(--elevation-card)]">
+      <div className="flex items-start justify-between gap-3 p-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-muted text-foreground">
+            <ShieldCheck className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-medium">Access</div>
+            <div className="text-xs text-muted-foreground">
+              Your role: {roleLabel(access?.role)}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {permissionSummary(access)}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5 border-t px-3 py-3 text-xs">
+        {highlighted.map((permission) => (
+          <span
+            key={permission}
+            className={cn(
+              "rounded-[8px] border px-2 py-0.5",
+              permissions[permission]
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : "text-muted-foreground",
+            )}
+          >
+            {permissionLabel(permission)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActivityPanel({ events }: { events: AuditEvent[] }) {
+  return (
+    <div className="rounded-[10px] border bg-card shadow-[var(--elevation-card)]">
+      <div className="flex items-start justify-between gap-3 p-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-muted text-foreground">
+            <Activity className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-medium">Activity</div>
+            <div className="text-xs text-muted-foreground">Recent repository events.</div>
+          </div>
+        </div>
+      </div>
+      <div className="border-t px-3 py-3">
+        {events.length > 0 ? (
+          <ol className="space-y-3">
+            {events.slice(0, 8).map((event) => (
+              <li key={event.id} className="border-l pl-3 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>{event.summary}</span>
+                  <span className="rounded-[7px] border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {auditResultLabel(event.result)}
+                  </span>
+                </div>
+                <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                  {formatAuditTime(event.at)}
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="text-xs text-muted-foreground">No repository activity recorded yet.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AutomationIntegration({
+  repoKey,
+  access,
+}: {
+  repoKey: string;
+  access: RepositoryAccess | null;
+}) {
   const [automation, setAutomation] = useState<RepositoryAutomationState | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -495,6 +645,9 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
     }
   };
 
+  const permission = automation?.enabled ? "automation.disable" : "automation.enable";
+  const blockedReason = disabledReason(access, permission);
+
   return (
     <div className="rounded-[10px] border bg-card shadow-[var(--elevation-card)]">
       <div className="flex items-start justify-between gap-3 p-3">
@@ -511,7 +664,8 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
         </div>
         <button
           onClick={toggleAutomation}
-          disabled={pending || automation == null}
+          disabled={pending || automation == null || Boolean(blockedReason)}
+          title={blockedReason}
           className={cn(
             "shrink-0 rounded-[8px] border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50",
             automation?.enabled
@@ -526,7 +680,13 @@ function AutomationIntegration({ repoKey }: { repoKey: string }) {
   );
 }
 
-function HarnessPanel() {
+function HarnessPanel({
+  repoKey,
+  access,
+}: {
+  repoKey: string;
+  access: RepositoryAccess | null;
+}) {
   const [status, setStatus] = useState<HarnessStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"pause" | "resume" | "tick" | "reconcile" | null>(null);
@@ -558,7 +718,7 @@ function HarnessPanel() {
     setPendingAction(action);
     setError(null);
     try {
-      const nextStatus = await postHarnessAction(action);
+      const nextStatus = await postHarnessAction(repoKey, action);
       setStatus(nextStatus);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update Harness");
@@ -625,7 +785,8 @@ function HarnessPanel() {
               label="Resume Harness"
               icon={<Play className="h-3.5 w-3.5" />}
               pending={pendingAction === "resume"}
-              disabled={pendingAction != null}
+              disabled={pendingAction != null || !canAccess(access, "harness.resume")}
+              disabledReason={disabledReason(access, "harness.resume")}
               onClick={() => runAction("resume")}
             />
           ) : (
@@ -633,7 +794,8 @@ function HarnessPanel() {
               label="Pause Harness"
               icon={<Pause className="h-3.5 w-3.5" />}
               pending={pendingAction === "pause"}
-              disabled={pendingAction != null}
+              disabled={pendingAction != null || !canAccess(access, "harness.pause")}
+              disabledReason={disabledReason(access, "harness.pause")}
               onClick={() => runAction("pause")}
             />
           )}
@@ -641,14 +803,16 @@ function HarnessPanel() {
             label="Run check now"
             icon={<RefreshCw className="h-3.5 w-3.5" />}
             pending={pendingAction === "tick"}
-            disabled={pendingAction != null}
+            disabled={pendingAction != null || !canAccess(access, "harness.tick")}
+            disabledReason={disabledReason(access, "harness.tick")}
             onClick={() => runAction("tick")}
           />
           <HarnessActionButton
             label="Reconcile"
             icon={<Activity className="h-3.5 w-3.5" />}
             pending={pendingAction === "reconcile"}
-            disabled={pendingAction != null}
+            disabled={pendingAction != null || !canAccess(access, "harness.reconcile")}
+            disabledReason={disabledReason(access, "harness.reconcile")}
             onClick={() => runAction("reconcile")}
           />
         </div>
@@ -783,12 +947,14 @@ function HarnessActionButton({
   icon,
   pending,
   disabled,
+  disabledReason,
   onClick,
 }: {
   label: string;
   icon: React.ReactNode;
   pending: boolean;
   disabled: boolean;
+  disabledReason?: string;
   onClick: () => void;
 }) {
   return (
@@ -796,12 +962,30 @@ function HarnessActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={disabledReason}
       className="inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1 text-xs transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
     >
       {icon}
       {pending ? "Working..." : label}
     </button>
   );
+}
+
+function permissionLabel(permission: string): string {
+  switch (permission) {
+    case "task.run_codex":
+      return "Run Codex";
+    case "review.approve":
+      return "Approve";
+    case "pull_request.open":
+      return "Open PR";
+    case "harness.pause":
+      return "Harness";
+    case "automation.enable":
+      return "Automation";
+    default:
+      return permission;
+  }
 }
 
 function HarnessDecisionGroup({

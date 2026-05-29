@@ -18,5 +18,5 @@ export async function PATCH(
   return proxyToSymphoniaService(`/api/repositories/${encodeURIComponent(repoKey)}/workflow`, {
     method: "PATCH",
     body: await jsonBody(request),
-  });
+  }, request);
 }

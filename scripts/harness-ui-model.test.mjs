@@ -47,6 +47,17 @@ const providerCompiled = ts.transpileModule(providerSource, {
 const providerCompiledPath = join(tempDir, "provider-ui-model.cjs");
 await writeFile(providerCompiledPath, providerCompiled.outputText);
 
+const accessSource = await readFile(new URL("../lib/access-ui-model.ts", import.meta.url), "utf8");
+const accessCompiled = ts.transpileModule(accessSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    importsNotUsedAsValues: ts.ImportsNotUsedAsValues.Remove,
+  },
+});
+const accessCompiledPath = join(tempDir, "access-ui-model.cjs");
+await writeFile(accessCompiledPath, accessCompiled.outputText);
+
 const require = createRequire(import.meta.url);
 const {
   activeRunPollingTarget,
@@ -94,6 +105,13 @@ const {
   providerStatusLabel,
   providerStatusTone,
 } = require(providerCompiledPath);
+
+const {
+  canAccess,
+  disabledReason,
+  permissionSummary,
+  roleLabel,
+} = require(accessCompiledPath);
 
 function task(attrs = {}) {
   return {
@@ -707,4 +725,61 @@ test("provider helpers label runnable and future providers", () => {
     "review branch",
     "validation",
   ]);
+});
+
+test("access helpers map V1 roles to permissions and disabled copy", () => {
+  const viewer = { role: "viewer", permissions: { "repository.view": true } };
+  const reviewer = {
+    role: "reviewer",
+    permissions: {
+      "repository.view": true,
+      "review.approve": true,
+      "review.request_changes": true,
+      "pull_request.refresh": true,
+    },
+  };
+  const operator = {
+    role: "operator",
+    permissions: {
+      "repository.view": true,
+      "task.run_codex": true,
+      "task.cancel_run": true,
+      "harness.pause": true,
+    },
+  };
+
+  assert.equal(roleLabel("owner"), "Owner");
+  assert.equal(
+    permissionSummary(viewer),
+    "Read-only access to tasks, readiness, handoffs, runs, and activity.",
+  );
+  assert.equal(canAccess(viewer, "task.run_codex"), false);
+  assert.equal(canAccess(reviewer, "review.approve"), true);
+  assert.equal(canAccess(reviewer, "pull_request.open"), false);
+  assert.equal(canAccess(operator, "harness.pause"), true);
+  assert.equal(canAccess(operator, "review.approve"), false);
+  assert.equal(disabledReason(viewer, "task.run_codex"), "You have read-only access.");
+  assert.equal(
+    disabledReason(reviewer, "pull_request.open"),
+    "Reviewers can approve or request changes, but only maintainers and owners can open pull requests.",
+  );
+  assert.equal(
+    disabledReason(operator, "review.approve"),
+    "Operators can manage runs and Harness controls, but cannot approve handoffs.",
+  );
+});
+
+test("Next service proxy forwards only safe actor headers", async () => {
+  const proxySource = await readFile(
+    new URL("../lib/server/symphonia-service.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(proxySource, /ACTOR_HEADER_NAMES/);
+  assert.match(proxySource, /"x-symphonia-actor"/);
+  assert.match(proxySource, /"x-symphonia-actor-id"/);
+  assert.match(proxySource, /"x-symphonia-role"/);
+  assert.match(proxySource, /forwardActorHeaders/);
+  assert.doesNotMatch(proxySource, /authorization/i);
+  assert.doesNotMatch(proxySource, /cookie/i);
 });

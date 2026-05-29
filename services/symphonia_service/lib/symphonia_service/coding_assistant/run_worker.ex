@@ -14,6 +14,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
     RunStore
   }
 
+  alias SymphoniaService.Access.{Actor, AuditLog}
   alias SymphoniaService.Harness.RetryPolicy
   alias SymphoniaService.TaskStore
 
@@ -66,6 +67,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
       })
       |> then(fn _task -> put_task_run(state["repository"], state["task_key"], run) end)
 
+    audit_run_outcome(state, run, "run.canceled")
     {:stop, :normal, {:ok, %{"run" => RunStore.public(run), "task" => task}}, state}
   end
 
@@ -105,6 +107,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
         run = RunStore.mark_step(run, "Writing handoff")
         completed_run = RunStore.mark_completed(run, handoff)
         task = HandoffBuilder.apply(repository, task_key, completed_run, handoff)
+        audit_run_outcome(state, completed_run, "run.completed")
         {:done, completed_run, task}
 
       {:error, reason} ->
@@ -227,7 +230,35 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
       "paused_reason" => paused_reason
     })
     |> then(fn _task -> put_task_run(state["repository"], state["task_key"], run) end)
+    |> tap(fn _task ->
+      action =
+        if paused_reason == "waiting_for_sync", do: "run.retry_scheduled", else: "run.failed"
+
+      audit_run_outcome(state, run, action)
+    end)
   end
+
+  defp audit_run_outcome(state, run, action) do
+    AuditLog.record(state["registry_path"], state["repository"], %{
+      "actor" => actor_for_run(run),
+      "action" => action,
+      "target" => %{"type" => "task", "id" => state["task_key"]},
+      "result" => if(action == "run.failed", do: "failed", else: "completed"),
+      "metadata" => %{
+        "runId" => run["id"],
+        "taskKey" => state["task_key"],
+        "provider" => run["provider"],
+        "workspaceProvider" => run["workspace_provider"],
+        "reviewBranch" => run["review_branch"],
+        "reasonCode" => run["failure_class"]
+      }
+    })
+  rescue
+    _error -> :ok
+  end
+
+  defp actor_for_run(%{"kind" => "daemon_assignment"}), do: Actor.harness()
+  defp actor_for_run(_run), do: Actor.default()
 
   defp put_task_run(repository, task_key, run) do
     TaskStore.patch_task(repository, task_key, %{

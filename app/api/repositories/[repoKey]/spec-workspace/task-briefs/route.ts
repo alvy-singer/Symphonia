@@ -13,5 +13,6 @@ export async function POST(
       method: "POST",
       body: await jsonBody(request),
     },
+    request,
   );
 }

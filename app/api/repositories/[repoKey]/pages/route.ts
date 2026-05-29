@@ -21,5 +21,5 @@ export async function POST(
   return proxyToSymphoniaService(`/api/repositories/${encodeURIComponent(repoKey)}/pages`, {
     method: "POST",
     body: await jsonBody(request),
-  });
+  }, request);
 }
