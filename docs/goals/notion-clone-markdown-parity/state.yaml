@@ -64,7 +64,7 @@ visual_board:
     command: "npx goalbuddy extend github-projects"
     missing: []
 
-active_task: T013
+active_task: T999
 
 tasks:
   - id: T001
@@ -376,7 +376,7 @@ tasks:
   - id: T013
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Run browser/runtime proof for the Notion-like markdown page flow, including create, sidebar list, edit, slash command, publish, reload persistence, archive/delete, Trash visibility, restore or permanent delete cleanup, and API/file persistence evidence."
     allowed_files:
@@ -394,11 +394,152 @@ tasks:
       - "Browser runtime becomes unavailable again."
       - "The frontend or service runtime becomes unreachable."
       - "The flow writes remote GitHub state or requires external credentials."
-    receipt: null
+    receipt:
+      path: docs/goals/notion-clone-markdown-parity/notes/T013-worker.md
+      summary: "Browser proof created, edited, slash-commanded, reloaded, and cleaned up a page, but found Publish/ellipsis actions clipped at the top edge and not reliably clickable."
+  - id: T014
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Fix the no-cover editor layout so saved-doc Publish and ellipsis actions are fully visible and clickable, then rerun focused verification for those actions."
+    allowed_files:
+      - "components/editor/markdown-editor.tsx"
+      - "docs/goals/notion-clone-markdown-parity/notes/T014-worker.md"
+      - "docs/goals/notion-clone-markdown-parity/state.yaml"
+    verify:
+      - "npm run build"
+      - "git diff --check"
+      - "Browser proof that Publish toggles to Published on a no-cover doc"
+      - "Browser proof that ellipsis opens Delete"
+    stop_if:
+      - "Need backend route changes."
+      - "Need files outside allowed_files."
+      - "Browser runtime becomes unavailable again."
+      - "Verification fails twice with the same unresolved cause."
+    receipt:
+      path: docs/goals/notion-clone-markdown-parity/notes/T014-worker.md
+      summary: "Fixed no-cover editor action-row spacing; browser retest proved Publish toggles and ellipsis opens Delete."
+  - id: T015
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Complete final browser/runtime proof for create/list/edit/slash/publish/reload/delete/trash/permanent-cleanup on the disposable markdown page."
+    allowed_files:
+      - "docs/goals/notion-clone-markdown-parity/notes/T015-worker.md"
+      - "docs/goals/notion-clone-markdown-parity/state.yaml"
+    verify:
+      - "Browser reload confirms title/body/sidebar/published state persists."
+      - "Browser Delete archives the page and routes away from the page."
+      - "Browser Trash shows the archived page."
+      - "Browser permanent delete removes the page from Trash."
+      - "API confirms no proof page remains after cleanup."
+    stop_if:
+      - "Browser runtime becomes unavailable again."
+      - "The frontend or service runtime becomes unreachable."
+      - "The flow writes remote GitHub state or requires external credentials."
+    receipt:
+      path: docs/goals/notion-clone-markdown-parity/notes/T015-worker.md
+      summary: "Final proof reached delete forever and Trash emptied, but API showed an unexpected fresh Untitled page-001 afterward; cleanup was fixed manually and needs a small UI hardening pass."
+  - id: T016
+    type: worker
+    assignee: Worker
+    status: superseded
+    reasoning_hint: medium
+    objective: "Harden Trash action clicks so restore/delete-forever cannot fall through to underlying sidebar controls, then rerun the cleanup proof."
+    allowed_files:
+      - "components/sidebar/doc-tree.tsx"
+      - "docs/goals/notion-clone-markdown-parity/notes/T016-worker.md"
+      - "docs/goals/notion-clone-markdown-parity/state.yaml"
+    verify:
+      - "npm run build"
+      - "git diff --check"
+      - "Browser proof that Delete forever leaves Trash empty and pages API empty"
+    stop_if:
+      - "Need backend route changes."
+      - "Need files outside allowed_files."
+      - "Browser runtime becomes unavailable again."
+      - "Verification fails twice with the same unresolved cause."
+    receipt:
+      path: docs/goals/notion-clone-markdown-parity/notes/T016-superseded.md
+      summary: "Superseded by user clarification: Trash restore/delete-forever behavior was deleted on purpose and must not be reintroduced."
+  - id: T017
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Apply the same immediate Untitled sidebar-create behavior from generic pages to existing workspace document collections such as milestones, requirements, plans, discussions, task proposals, task briefs, and decisions."
+    allowed_files:
+      - "services/symphonia_service/lib/symphonia_service/spec_workspace.ex"
+      - "services/symphonia_service/lib/symphonia_service/http_server.ex"
+      - "app/api/repositories/[repoKey]/spec-workspace/artifacts/[artifactType]/route.ts"
+      - "components/sidebar/doc-tree.tsx"
+      - "docs/goals/notion-clone-markdown-parity/notes/T017-worker.md"
+      - "docs/goals/notion-clone-markdown-parity/state.yaml"
+    verify:
+      - "npm run build"
+      - "git diff --check"
+      - "Browser or API proof that a workspace collection plus creates an Untitled artifact and routes to the editor"
+    stop_if:
+      - "Need destructive deletion of existing workspace artifacts."
+      - "Need to change singleton codebase documents into creatable collections."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with the same unresolved cause."
+    receipt:
+      path: docs/goals/notion-clone-markdown-parity/notes/T017-worker.md
+      summary: "Added generic workspace artifact creation plus sidebar Untitled create controls for milestones, discussions, requirements, task proposals, task briefs, plans, and decisions."
+  - id: T018
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Remove the old /r/:repo/docs index surface while preserving individual document pages, and route delete/archive fallbacks back to the repo shell instead of the removed docs index."
+    allowed_files:
+      - "app/r/[repoKey]/docs/page.tsx"
+      - "components/editor/markdown-editor.tsx"
+      - "components/sidebar/doc-tree.tsx"
+      - "docs/goals/notion-clone-markdown-parity/notes/T018-worker.md"
+      - "docs/goals/notion-clone-markdown-parity/state.yaml"
+    verify:
+      - "npm run build"
+      - "git diff --check"
+      - "Browser proof that /r/sym/docs redirects away to /r/sym and no docs index page is shown"
+    stop_if:
+      - "Need to remove individual /r/:repo/docs/:pageId document routes."
+      - "Need backend route changes."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with the same unresolved cause."
+    receipt:
+      path: docs/goals/notion-clone-markdown-parity/notes/T018-worker.md
+      summary: "Removed the old docs index surface by redirecting /r/:repo/docs to the repo shell and updated delete/archive fallbacks away from the removed index."
+  - id: T019
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Make Codebase, Milestone, Plans, Decisions, and related spec workspace artifacts use the same Notion-like Markdown editor experience as generic pages, including icon/cover controls, save status, publish affordance, formatting toolbar, and slash commands."
+    allowed_files:
+      - "components/editor/markdown-editor.tsx"
+      - "components/spec-artifact-editor.tsx"
+      - "docs/goals/notion-clone-markdown-parity/notes/T019-worker.md"
+      - "docs/goals/notion-clone-markdown-parity/state.yaml"
+    verify:
+      - "npm run build"
+      - "git diff --check"
+      - "Runtime proof that a workspace artifact route shows Add icon, Add cover, Publish, ellipsis, formatting toolbar, and slash-command editor"
+    stop_if:
+      - "Need backend schema changes beyond existing spec artifact metadata."
+      - "Need to change Clarise generation semantics."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with the same unresolved cause."
+    receipt:
+      path: docs/goals/notion-clone-markdown-parity/notes/T019-worker.md
+      summary: "Replaced the old spec artifact form editor with the shared Notion-like Markdown editor and spec-workspace persistence bridge."
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Final audit: prove whether the full original Notion-clone markdown parity outcome is complete."
     inputs:
@@ -422,7 +563,7 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T011
+    task: T016
     commands:
       - "npm run build -> passed"
-      - "git diff --check -> passed"
+      - "rg Trash/Restore/Delete forever/sidebar archived controls -> no matches"

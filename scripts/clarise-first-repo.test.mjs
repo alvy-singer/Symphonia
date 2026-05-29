@@ -31,6 +31,7 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
   const repoPage = await source("app/r/[repoKey]/page.tsx");
   const dashboard = await source("app/dashboard/page.tsx");
   const sidebar = await source("components/sidebar/sidebar-body.tsx");
+  const docTree = await source("components/sidebar/doc-tree.tsx");
   const palette = await source("components/command-palette.tsx");
 
   assert.match(repoPage, /ClariseRepoHome/);
@@ -46,10 +47,18 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
 
   assert.match(sidebar, /label="Clarise"/);
   assert.match(sidebar, /href=\{`\/r\/\$\{t\.key\.toLowerCase\(\)\}`\}/);
-  assert.match(sidebar, /Document tree menu/);
-  assert.match(sidebar, /Open document tree/);
-  assert.match(sidebar, /Close document tree/);
-  assert.match(sidebar, /symphonia\.doctreeOpen\.\$\{repoSlug\}/);
+  assert.match(sidebar, /<DocTree repoKey=\{repoKey\} \/>/);
+  assert.doesNotMatch(sidebar, /Document tree menu/);
+  assert.doesNotMatch(sidebar, /Open document tree/);
+  assert.doesNotMatch(sidebar, /Close document tree/);
+  assert.doesNotMatch(sidebar, /symphonia\.doctreeOpen/);
+  assert.match(sidebar, /<WorkspaceCreateMenu pending=\{workspacePagePending\} onCreate=\{createWorkspacePage\} \/>/);
+  assert.match(sidebar, /aria-label="Create workspace page"/);
+  assert.match(sidebar, /<Plus className="h-3\.5 w-3\.5" \/>/);
+  assert.doesNotMatch(docTree, /aria-label="Pages menu"/);
+  assert.doesNotMatch(docTree, /aria-label="New page"/);
+  assert.doesNotMatch(docTree, /aria-label="Open trash"/);
+  assert.doesNotMatch(docTree, /tabular-nums[\s\S]*artifacts\.length/);
 
   assert.match(palette, /id: "nav-clarise"/);
   assert.match(palette, /id: "nav-workflow"/);
@@ -233,4 +242,32 @@ test("spec workspace supports private task brief artifacts", async () => {
   assert.doesNotMatch(workspacePage, /SpecWorkspaceIndex/);
   assert.match(workspacePage, /notFound\(\)/);
   assert.match(workspaceIndex, /Private/);
+});
+
+test("Clarise milestone compiler supports editable selected task proposals", async () => {
+  const loop = await source("components/clarise-milestone-loop.tsx");
+  const compiler = await source(
+    "services/symphonia_service/lib/symphonia_service/clarise/plan_to_task_compiler.ex",
+  );
+  const markdown = await source("services/symphonia_service/lib/symphonia_service/markdown.ex");
+
+  assert.match(loop, /Compile tasks/);
+  assert.match(loop, /Create selected/);
+  assert.match(loop, /Create all/);
+  assert.match(loop, /Harness readiness/);
+  assert.match(loop, /selectedProposalItemIds/);
+  assert.match(loop, /acceptance_criteria/);
+  assert.match(loop, /review_expectations/);
+  assert.match(loop, /Move task up/);
+  assert.match(loop, /Move task down/);
+
+  assert.match(compiler, /proposal_items/);
+  assert.match(compiler, /selectedProposalItemIds/);
+  assert.match(compiler, /@generation_version "v2"/);
+  assert.match(compiler, /@legacy_generation_versions \["v1"\]/);
+  assert.match(compiler, /source_discussion/);
+  assert.match(compiler, /Task proposal is required before creating tasks/);
+  assert.match(compiler, /not selected or already created/);
+  assert.match(markdown, /proposal_items/);
+  assert.match(markdown, /JSON\.encode!\(values\)/);
 });

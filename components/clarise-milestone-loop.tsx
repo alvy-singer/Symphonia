@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  AlertTriangle,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   CheckCircle2,
   Circle,
   ClipboardList,
@@ -52,7 +55,9 @@ type LoopPayload = {
 
 type TaskProposalItem = {
   id: string;
+  selected?: boolean;
   title: string;
+  body?: string;
   priority: string;
   depends_on: string[];
   goal: string;
@@ -60,6 +65,19 @@ type TaskProposalItem = {
   acceptance_criteria: string[];
   review_expectations: string[];
   related_artifacts: string[];
+  linked_files?: string[];
+  automation_readiness?: AutomationReadiness;
+};
+
+type AutomationReadiness = {
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
+};
+
+type TaskProposalCreatePayload = {
+  selectedProposalItemIds: string[];
+  items: TaskProposalItem[];
 };
 
 type GeneratedTask = {
@@ -75,7 +93,11 @@ type TaskProposalPayload = {
   tasks?: GeneratedTask[];
   createdTasks?: string[];
   createdCount?: number;
+  skipped?: { title: string; reason: string }[];
   generationId?: string;
+  blockers?: string[];
+  warnings?: string[];
+  automationReadiness?: AutomationReadiness;
   nextStep?: string;
   taskBoard?: {
     sourceMilestone?: string;
@@ -300,14 +322,14 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
     );
   };
 
-  const createTasksFromProposal = () => {
+  const createTasksFromProposal = (createPayload: TaskProposalCreatePayload) => {
     if (!milestone) return;
     void (async () => {
       setPending("task-create");
       setError(null);
       setNotice(null);
       try {
-        const payload = await postTaskCompiler(repoKey, milestone.id, "create", {});
+        const payload = await postTaskCompiler(repoKey, milestone.id, "create", createPayload);
         setTaskProposal(payload);
         window.dispatchEvent(
           new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }),
@@ -317,7 +339,17 @@ export function ClariseMilestoneLoop({ repoKey }: { repoKey: string }) {
           payload.createdTasks ??
           payload.taskBoard?.createdTasks ??
           metadataList(payload.proposal, "created_tasks");
-        router.push(taskBoardHref(repoSlug, milestone.id, createdTasks));
+
+        if (payload.nextStep === "resolve_dependencies" && (payload.createdCount ?? 0) === 0) {
+          setNotice("Resolve proposal dependencies before creating tasks.");
+          return;
+        }
+
+        if (createdTasks.length > 0) {
+          router.push(taskBoardHref(repoSlug, milestone.id, createdTasks));
+        } else {
+          setNotice("No new tasks were created.");
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Clarise could not create tasks");
       } finally {
@@ -846,13 +878,48 @@ function TaskProposalPanel({
   pending: string | null;
   onGenerate: () => void;
   onRegenerate: () => void;
-  onCreate: () => void;
+  onCreate: (payload: TaskProposalCreatePayload) => void;
   onCancel: () => void;
 }) {
   const items = proposal?.items ?? [];
+  const [draftItems, setDraftItems] = useState<TaskProposalItem[]>([]);
   const createdTasks = proposal?.createdTasks ?? metadataList(proposal?.proposal, "created_tasks");
   const hasCreatedTasks = createdTasks.length > 0;
   const isPending = pending === "task-propose" || pending === "task-create";
+  const selectedCount = draftItems.filter((item) => item.selected !== false).length;
+  const readiness = proposal?.automationReadiness ?? readinessFromItems(draftItems);
+
+  useEffect(() => {
+    setDraftItems(items.map(normalizeProposalItem));
+  }, [items, proposal?.generationId]);
+
+  const updateItem = (id: string, patch: Partial<TaskProposalItem>) => {
+    setDraftItems((current) =>
+      current.map((item) => (item.id === id ? normalizeProposalItem({ ...item, ...patch }) : item)),
+    );
+  };
+
+  const moveItem = (id: string, direction: -1 | 1) => {
+    setDraftItems((current) => {
+      const index = current.findIndex((item) => item.id === id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      const [item] = next.splice(index, 1);
+      next.splice(nextIndex, 0, item);
+      return next;
+    });
+  };
+
+  const createPayload = (sourceItems: TaskProposalItem[]): TaskProposalCreatePayload => ({
+    selectedProposalItemIds: sourceItems
+      .filter((item) => item.selected !== false)
+      .map((item) => item.id),
+    items: sourceItems.map(normalizeProposalItem),
+  });
+
+  const createAllPayload = (): TaskProposalCreatePayload =>
+    createPayload(draftItems.map((item) => ({ ...item, selected: true })));
 
   return (
     <section className="border-y py-5">
@@ -888,7 +955,7 @@ function TaskProposalPanel({
             className="inline-flex items-center gap-2 rounded-md border bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ClipboardList className="h-4 w-4" />
-            {pending === "task-propose" ? "Generating..." : "Generate implementation tasks"}
+            {pending === "task-propose" ? "Compiling..." : "Compile tasks"}
           </button>
         </div>
       )}
@@ -907,7 +974,7 @@ function TaskProposalPanel({
             className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ClipboardList className="h-4 w-4" />
-            {pending === "task-propose" ? "Generating..." : "Generate implementation tasks"}
+            {pending === "task-propose" ? "Compiling..." : "Compile tasks"}
           </button>
         </div>
       )}
@@ -915,15 +982,28 @@ function TaskProposalPanel({
       {items.length > 0 && !hasCreatedTasks && (
         <div className="mt-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm font-medium">Clarise proposed {items.length} tasks.</p>
+            <div>
+              <p className="text-sm font-medium">Clarise proposed {items.length} tasks.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {selectedCount} selected. Edit the proposal before writing task files.
+              </p>
+            </div>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={onCreate}
-                disabled={isPending}
+                onClick={() => onCreate(createPayload(draftItems))}
+                disabled={isPending || selectedCount === 0}
                 className="inline-flex items-center gap-2 rounded-md border bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <CheckCircle2 className="h-4 w-4" />
-                {pending === "task-create" ? "Creating..." : "Create tasks and open board"}
+                {pending === "task-create" ? "Creating..." : "Create selected"}
+              </button>
+              <button
+                onClick={() => onCreate(createAllPayload())}
+                disabled={isPending}
+                className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ClipboardList className="h-4 w-4" />
+                Create all
               </button>
               <button
                 onClick={onRegenerate}
@@ -943,9 +1023,23 @@ function TaskProposalPanel({
               </button>
             </div>
           </div>
+          <HarnessReadinessPanel readiness={readiness} />
+          {(proposal?.blockers?.length ?? 0) > 0 && proposal?.nextStep === "resolve_dependencies" && (
+            <Notice tone="warn">
+              Resolve proposal dependencies before creating tasks. Dependencies must be selected or already created.
+            </Notice>
+          )}
           <div className="divide-y rounded-md border">
-            {items.map((item, index) => (
-              <TaskProposalItemRow key={item.id} item={item} index={index} />
+            {draftItems.map((item, index) => (
+              <TaskProposalItemRow
+                key={item.id}
+                item={item}
+                index={index}
+                total={draftItems.length}
+                disabled={isPending}
+                onChange={(patch) => updateItem(item.id, patch)}
+                onMove={(direction) => moveItem(item.id, direction)}
+              />
             ))}
           </div>
         </div>
@@ -991,33 +1085,181 @@ function TaskProposalPanel({
   );
 }
 
-function TaskProposalItemRow({ item, index }: { item: TaskProposalItem; index: number }) {
+function HarnessReadinessPanel({ readiness }: { readiness: AutomationReadiness }) {
+  const hasWarnings = readiness.warnings.length > 0;
+  const hasBlockers = readiness.blockers.length > 0;
+
   return (
-    <article className="grid gap-3 p-3 md:grid-cols-[2.5rem_minmax(0,1fr)_minmax(12rem,16rem)]">
-      <div className="grid h-8 w-8 place-items-center rounded-md bg-muted text-xs font-medium">
-        {index + 1}
+    <div className="rounded-md border bg-muted/20 px-3 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {readiness.ready ? (
+          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+        ) : (
+          <AlertTriangle className="h-4 w-4 text-amber-500" />
+        )}
+        <p className="text-sm font-medium">Harness readiness</p>
+        <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+          {readiness.ready ? "Ready estimate" : "Advisory blockers"}
+        </span>
+      </div>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        This preview estimates obvious setup issues. Harness eligibility remains authoritative after task creation.
+      </p>
+      {(hasBlockers || hasWarnings) && (
+        <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
+          <ReadinessList title="Blocked" items={readiness.blockers} fallback="No obvious blockers." />
+          <ReadinessList title="Warnings" items={readiness.warnings} fallback="No warnings." />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReadinessList({
+  title,
+  items,
+  fallback,
+}: {
+  title: string;
+  items: string[];
+  fallback: string;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-muted-foreground">{title}</p>
+      {items.length > 0 ? (
+        <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-xs text-muted-foreground">{fallback}</p>
+      )}
+    </div>
+  );
+}
+
+function TaskProposalItemRow({
+  item,
+  index,
+  total,
+  disabled,
+  onChange,
+  onMove,
+}: {
+  item: TaskProposalItem;
+  index: number;
+  total: number;
+  disabled: boolean;
+  onChange: (patch: Partial<TaskProposalItem>) => void;
+  onMove: (direction: -1 | 1) => void;
+}) {
+  return (
+    <article className="grid gap-3 p-3 md:grid-cols-[2.75rem_minmax(0,1fr)_minmax(13rem,18rem)]">
+      <div className="space-y-2">
+        <label
+          className={cn(
+            "grid h-8 w-8 place-items-center rounded-md border text-xs font-medium",
+            item.selected === false
+              ? "bg-background text-muted-foreground"
+              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={item.selected !== false}
+            disabled={disabled}
+            onChange={(event) => onChange({ selected: event.target.checked })}
+            className="sr-only"
+          />
+          {index + 1}
+        </label>
+        <div className="grid gap-1">
+          <button
+            type="button"
+            disabled={disabled || index === 0}
+            onClick={() => onMove(-1)}
+            className="grid h-7 w-8 place-items-center rounded-md border text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Move task up"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={disabled || index === total - 1}
+            onClick={() => onMove(1)}
+            className="grid h-7 w-8 place-items-center rounded-md border text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Move task down"
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-semibold">{item.title}</p>
+        <label className="block text-xs font-medium text-muted-foreground">
+          Title
+          <input
+            value={item.title}
+            disabled={disabled}
+            onChange={(event) => onChange({ title: event.target.value })}
+            className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-medium text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+          />
+        </label>
         <p className="mt-1 text-xs text-muted-foreground">{item.id}</p>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.goal}</p>
-        {item.review_expectations.length > 0 && (
-          <div className="mt-3">
-            <p className="text-xs font-medium text-muted-foreground">Review expectations</p>
-            <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
-              {item.review_expectations.map((expectation) => (
-                <li key={expectation}>{expectation}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <label className="mt-3 block text-xs font-medium text-muted-foreground">
+          Acceptance criteria
+          <textarea
+            value={item.acceptance_criteria.join("\n")}
+            disabled={disabled}
+            rows={3}
+            onChange={(event) =>
+              onChange({ acceptance_criteria: splitLines(event.target.value) })
+            }
+            className="mt-1 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+          />
+        </label>
+        <label className="mt-3 block text-xs font-medium text-muted-foreground">
+          Review expectations
+          <textarea
+            value={item.review_expectations.join("\n")}
+            disabled={disabled}
+            rows={3}
+            onChange={(event) =>
+              onChange({ review_expectations: splitLines(event.target.value) })
+            }
+            className="mt-1 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+          />
+        </label>
       </div>
       <div className="space-y-2 text-xs text-muted-foreground">
-        <MetaLine label="Priority" value={item.priority} />
-        <MetaLine
-          label="Depends on"
-          value={item.depends_on.length > 0 ? item.depends_on.join(", ") : "None"}
-        />
+        <label className="block text-xs font-medium text-muted-foreground">
+          Priority
+          <select
+            value={item.priority}
+            disabled={disabled}
+            onChange={(event) => onChange({ priority: event.target.value })}
+            className="mt-1 w-full rounded-md border bg-background px-2 py-2 text-xs text-foreground disabled:opacity-60"
+          >
+            {["urgent", "high", "medium", "low", "no-priority"].map((priority) => (
+              <option key={priority} value={priority}>
+                {priority}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-xs font-medium text-muted-foreground">
+          Depends on
+          <textarea
+            value={item.depends_on.join("\n")}
+            disabled={disabled}
+            rows={3}
+            onChange={(event) => onChange({ depends_on: splitLines(event.target.value) })}
+            className="mt-1 w-full resize-y rounded-md border bg-background px-2 py-2 font-mono text-[11px] text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+          />
+        </label>
+        <MetaLine label="Selected" value={item.selected === false ? "No" : "Yes"} />
       </div>
     </article>
   );
@@ -1095,8 +1337,16 @@ async function fetchExistingTaskProposal(
     const proposal = await fetchArtifact(repoKey, "task_proposal", `${milestoneId}-task-proposal`);
     return {
       proposal,
+      items: metadataProposalItems(proposal),
       createdTasks: metadataList(proposal, "created_tasks"),
       generationId: metadataString(proposal, "generation_id"),
+      blockers: metadataList(proposal, "blockers"),
+      warnings: metadataList(proposal, "warnings"),
+      automationReadiness: {
+        ready: metadataList(proposal, "blockers").length === 0,
+        blockers: metadataList(proposal, "blockers"),
+        warnings: metadataList(proposal, "warnings"),
+      },
     };
   } catch {
     return null;
@@ -1161,6 +1411,82 @@ function workflowIndex(
   if (milestone.status === "requirements_ready" || linked.requirements) return 3;
   if (milestone.status === "in_discussion" || linked.discussion) return 2;
   return 1;
+}
+
+function normalizeProposalItem(item: TaskProposalItem): TaskProposalItem {
+  return {
+    ...item,
+    selected: item.selected !== false,
+    priority: item.priority || "medium",
+    depends_on: normalizeStringList(item.depends_on),
+    implementation_notes: normalizeStringList(item.implementation_notes),
+    acceptance_criteria: normalizeStringList(item.acceptance_criteria),
+    review_expectations: normalizeStringList(item.review_expectations),
+    related_artifacts: normalizeStringList(item.related_artifacts),
+    linked_files: normalizeStringList(item.linked_files),
+  };
+}
+
+function readinessFromItems(items: TaskProposalItem[]): AutomationReadiness {
+  const readiness = items
+    .map((item) => item.automation_readiness)
+    .find((value): value is AutomationReadiness => Boolean(value));
+
+  return readiness ?? { ready: true, blockers: [], warnings: [] };
+}
+
+function metadataProposalItems(artifact: SpecArtifact | undefined): TaskProposalItem[] {
+  const value = artifact?.metadata.proposal_items;
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) =>
+      normalizeProposalItem({
+        id: stringValue(item.id),
+        selected: item.selected !== false,
+        title: stringValue(item.title),
+        body: stringValue(item.body),
+        priority: stringValue(item.priority) || "medium",
+        depends_on: normalizeStringList(item.depends_on),
+        goal: stringValue(item.goal),
+        implementation_notes: normalizeStringList(item.implementation_notes),
+        acceptance_criteria: normalizeStringList(item.acceptance_criteria),
+        review_expectations: normalizeStringList(item.review_expectations),
+        related_artifacts: normalizeStringList(item.related_artifacts),
+        linked_files: normalizeStringList(item.linked_files),
+        automation_readiness: readinessValue(item.automation_readiness),
+      }),
+    )
+    .filter((item) => item.id && item.title);
+}
+
+function readinessValue(value: unknown): AutomationReadiness | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  return {
+    ready: raw.ready === true,
+    blockers: normalizeStringList(raw.blockers),
+    warnings: normalizeStringList(raw.warnings),
+  };
+}
+
+function splitLines(value: string): string[] {
+  return normalizeStringList(value.split("\n"));
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return typeof value === "string" && value.trim() ? [value.trim()] : [];
+  }
+
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function metadataString(artifact: SpecArtifact | undefined, key: string): string {

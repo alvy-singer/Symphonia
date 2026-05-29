@@ -68,6 +68,9 @@ export interface SpecArtifact {
     generated_by?: string;
     generation_id?: string;
     created_tasks?: string[];
+    proposal_items?: unknown[];
+    blockers?: string[];
+    warnings?: string[];
   };
   body: string;
 }

@@ -278,7 +278,7 @@ export default function DashboardPage() {
               Connect a repo. Clarise creates the workspace files.
             </h1>
             <p className="mt-4 max-w-xl text-[17px] leading-7 text-muted-foreground">
-              After a repository opens, use Clarise to create the GSD workspace:
+              After a repository opens, use Clarise to create your private workspace:
               milestones, requirements, plans, decisions, and task briefs.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-3">

@@ -1,17 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
+  FileText,
   Hash,
   Inbox,
   KanbanSquare,
   MessageCircle,
-  MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Search,
   Settings,
@@ -21,9 +19,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DocTree } from "@/components/sidebar/doc-tree";
-import { useCommandPalette } from "@/components/command-palette";
-import { useNewTask } from "@/components/new-task-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useCommandPalette } from "@/components/command-palette";
+import { useDocs } from "@/lib/docs-store";
+import { useNewTask } from "@/components/new-task-dialog";
 import type { RepositorySummary } from "@/lib/repository-model";
 
 interface Props {
@@ -39,13 +38,14 @@ interface Props {
  */
 export function SidebarBody({ repoKey, onNavigate }: Props) {
   const pathname = usePathname();
+  const router = useRouter();
   const repoSlug = repoKey.toLowerCase();
   const base = `/r/${repoSlug}`;
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
+  const [workspacePagePending, setWorkspacePagePending] = useState(false);
   const palette = useCommandPalette();
+  const { createPage } = useDocs();
   const newTask = useNewTask();
-  const [docTreeOpen, setDocTreeOpen] = useState(true);
-  const [docTreeMenuOpen, setDocTreeMenuOpen] = useState(false);
   const repo = useMemo(
     () => repositories.find((r) => r.key.toLowerCase() === repoSlug),
     [repositories, repoSlug],
@@ -70,23 +70,18 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
 
   const isActive = (to: string) => pathname === to || pathname.startsWith(to + "/");
   const handleNav = () => onNavigate?.();
-  const docTreeStorageKey = `symphonia.doctreeOpen.${repoSlug}`;
 
-  useEffect(() => {
+  const createWorkspacePage = async () => {
+    setWorkspacePagePending(true);
     try {
-      setDocTreeOpen(window.localStorage.getItem(docTreeStorageKey) !== "0");
-    } catch {
-      setDocTreeOpen(true);
-    }
-  }, [docTreeStorageKey]);
-
-  const setDocTreeVisibility = (open: boolean) => {
-    setDocTreeOpen(open);
-    setDocTreeMenuOpen(false);
-    try {
-      window.localStorage.setItem(docTreeStorageKey, open ? "1" : "0");
-    } catch {
-      /* ignore */
+      const page = await createPage(repoKey, "doc", {
+        title: "Untitled",
+        body: "",
+      });
+      router.push(`/r/${repoSlug}/docs/${encodeURIComponent(page.id)}`);
+      handleNav();
+    } finally {
+      setWorkspacePagePending(false);
     }
   };
 
@@ -204,44 +199,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
             <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Workspace
             </span>
-            <Popover open={docTreeMenuOpen} onOpenChange={setDocTreeMenuOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Document tree menu"
-                  title="Document tree menu"
-                  className="grid h-6 w-6 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-                >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-48 p-1">
-                <button
-                  type="button"
-                  aria-pressed={docTreeOpen}
-                  onClick={() => setDocTreeVisibility(true)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-accent",
-                    docTreeOpen ? "text-foreground" : "text-muted-foreground",
-                  )}
-                >
-                  <PanelLeftOpen className="h-3.5 w-3.5" />
-                  Open document tree
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={!docTreeOpen}
-                  onClick={() => setDocTreeVisibility(false)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-accent",
-                    !docTreeOpen ? "text-foreground" : "text-muted-foreground",
-                  )}
-                >
-                  <PanelLeftClose className="h-3.5 w-3.5" />
-                  Close document tree
-                </button>
-              </PopoverContent>
-            </Popover>
+            <WorkspaceCreateMenu pending={workspacePagePending} onCreate={createWorkspacePage} />
           </div>
           <nav className="mb-1 space-y-0.5">
             <NavLink
@@ -253,7 +211,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
               title="Start with the Clarise repo chat"
             />
           </nav>
-          {docTreeOpen && <DocTree repoKey={repoKey} />}
+          <DocTree repoKey={repoKey} />
         </div>
 
         <div>
@@ -340,6 +298,40 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function WorkspaceCreateMenu({
+  pending,
+  onCreate,
+}: {
+  pending: boolean;
+  onCreate: () => Promise<void>;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Create workspace page"
+          title="Create workspace page"
+          className="grid h-6 w-6 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-44 p-1">
+        <button
+          type="button"
+          onClick={() => void onCreate()}
+          disabled={pending}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <FileText className="h-3.5 w-3.5" />
+          New page
+        </button>
+      </PopoverContent>
+    </Popover>
   );
 }
 

@@ -55,6 +55,9 @@ defmodule SymphoniaService.Markdown do
     "generated_by",
     "generation_id",
     "proposal_item_id",
+    "proposal_items",
+    "blockers",
+    "warnings",
     "depends_on",
     "review_expectations",
     "created_tasks"
@@ -230,11 +233,16 @@ defmodule SymphoniaService.Markdown do
   end
 
   defp render_entry(key, values) when is_list(values) do
-    if Enum.empty?(values) do
-      "#{key}: []"
-    else
-      [key <> ":" | Enum.map(values, &"  - #{format_scalar(&1)}")]
-      |> Enum.join("\n")
+    cond do
+      Enum.empty?(values) ->
+        "#{key}: []"
+
+      Enum.all?(values, &is_map/1) ->
+        "#{key}: #{JSON.encode!(values)}"
+
+      true ->
+        [key <> ":" | Enum.map(values, &"  - #{format_scalar(&1)}")]
+        |> Enum.join("\n")
     end
   end
 

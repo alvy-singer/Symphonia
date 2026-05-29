@@ -363,6 +363,11 @@ defmodule SymphoniaService.HTTPServer do
         {200,
          %{"repo" => repository["key"], "specWorkspace" => spec_workspace_payload(repository)}}
 
+      ["api", "repositories", repo, "spec-workspace", "artifacts", type] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        artifact = SpecWorkspace.create_artifact(repository, type, decode_json(body))
+        {201, %{"artifact" => artifact}}
+
       ["api", "repositories", repo, "spec-workspace", "milestones"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         artifact = SpecWorkspace.create_milestone(repository, decode_json(body))

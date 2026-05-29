@@ -10,10 +10,9 @@ import {
   GitBranch,
   MoreHorizontal,
   Plus,
-  RotateCcw,
-  Trash2,
 } from "lucide-react";
 import type {
+  SpecArtifact,
   SpecArtifactStatus,
   SpecArtifactSummary,
   SpecArtifactType,
@@ -29,14 +28,19 @@ interface Props {
 }
 
 const WORKSPACE_GROUPS = [
-  { label: "Codebase", sectionLabels: ["Codebase"] },
+  { label: "Codebase", sectionLabels: ["Codebase"], createTypes: [] },
   {
     label: "Milestone",
-    sectionLabels: ["Milestones", "Discussions", "Requirements", "Task proposals"],
+    sectionLabels: ["Milestones", "Discussions", "Requirements", "Task proposals", "Task briefs"],
+    createTypes: ["milestone", "discussion", "requirements", "task_proposal", "task_brief"],
   },
-  { label: "Plans", sectionLabels: ["Plans"] },
-  { label: "Decisions", sectionLabels: ["Decisions"] },
-];
+  { label: "Plans", sectionLabels: ["Plans"], createTypes: ["plan"] },
+  { label: "Decisions", sectionLabels: ["Decisions"], createTypes: ["decision"] },
+] satisfies Array<{
+  label: string;
+  sectionLabels: string[];
+  createTypes: SpecArtifactType[];
+}>;
 
 const SPEC_TYPE_LABELS: Record<SpecArtifactType, string> = {
   codebase_map: "Codebase map",
@@ -73,13 +77,10 @@ export function DocTree({ repoKey }: Props) {
   const router = useRouter();
   const slug = repoKey.toLowerCase();
   const {
-    archivedForRepo,
     archivePage,
     createPage,
-    deletePage,
     forRepo,
     hydrated,
-    restorePage,
   } = useDocs();
   const [specWorkspace, setSpecWorkspace] = useState<SpecWorkspacePayload | null>(null);
   const [specPending, setSpecPending] = useState<string | null>(null);
@@ -93,14 +94,6 @@ export function DocTree({ repoKey }: Props) {
         .sort((a, b) => a.createdAt - b.createdAt),
     [forRepo, repoKey],
   );
-  const archivedDocPages = useMemo(
-    () =>
-      archivedForRepo(repoKey)
-        .filter((page) => page.category === "doc")
-        .sort((a, b) => b.updatedAt - a.updatedAt),
-    [archivedForRepo, repoKey],
-  );
-
   const loadSpecWorkspace = useCallback(async () => {
     const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace`, {
       cache: "no-store",
@@ -161,6 +154,34 @@ export function DocTree({ repoKey }: Props) {
     }
   };
 
+  const createSpecArtifact = async (type: SpecArtifactType) => {
+    const pendingKey = `spec-create:${type}`;
+    setSpecPending(pendingKey);
+    setSpecError(null);
+    try {
+      const res = await fetch(
+        `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/artifacts/${encodeURIComponent(
+          type,
+        )}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "Untitled", body: "" }),
+        },
+      );
+      const payload = (await res.json()) as { artifact?: SpecArtifact; error?: string };
+      if (!res.ok || !payload.artifact) {
+        throw new Error(payload.error ?? "Could not create workspace document");
+      }
+      await loadSpecWorkspace();
+      router.push(specArtifactHref(slug, payload.artifact));
+    } catch (err) {
+      setSpecError(err instanceof Error ? err.message : "Could not create workspace document");
+    } finally {
+      setSpecPending(null);
+    }
+  };
+
   const createUntitledPage = async (parentId?: string) => {
     const pendingKey = `create:${parentId ?? "root"}`;
     setPagePending(pendingKey);
@@ -181,26 +202,8 @@ export function DocTree({ repoKey }: Props) {
     try {
       await archivePage(page.id);
       if (pathname === `/r/${slug}/docs/${page.id}`) {
-        router.push(`/r/${slug}/docs`);
+        router.push(`/r/${slug}`);
       }
-    } finally {
-      setPagePending(null);
-    }
-  };
-
-  const restoreDocPage = async (page: DocPage) => {
-    setPagePending(`restore:${page.id}`);
-    try {
-      await restorePage(page.id);
-    } finally {
-      setPagePending(null);
-    }
-  };
-
-  const permanentlyDeleteDocPage = async (page: DocPage) => {
-    setPagePending(`delete:${page.id}`);
-    try {
-      await deletePage(page.id);
     } finally {
       setPagePending(null);
     }
@@ -223,13 +226,10 @@ export function DocTree({ repoKey }: Props) {
         repoSlug={slug}
         currentPath={pathname}
         pages={docPages}
-        archivedPages={archivedDocPages}
         hydrated={hydrated}
         pending={pagePending}
         onCreate={createUntitledPage}
         onArchive={archiveDocPage}
-        onRestore={restoreDocPage}
-        onPermanentDelete={permanentlyDeleteDocPage}
       />
 
       {specError && (
@@ -251,8 +251,11 @@ export function DocTree({ repoKey }: Props) {
                 key={group.label}
                 label={group.label}
                 artifacts={artifacts}
+                createTypes={group.createTypes}
+                pending={specPending}
                 repoSlug={slug}
                 currentPath={pathname}
+                onCreate={createSpecArtifact}
               />
             );
           })}
@@ -278,24 +281,18 @@ function PageTreeSection({
   repoSlug,
   currentPath,
   pages,
-  archivedPages,
   hydrated,
   pending,
   onCreate,
   onArchive,
-  onRestore,
-  onPermanentDelete,
 }: {
   repoSlug: string;
   currentPath: string;
   pages: DocPage[];
-  archivedPages: DocPage[];
   hydrated: boolean;
   pending: string | null;
   onCreate: (parentId?: string) => Promise<void>;
   onArchive: (page: DocPage) => Promise<void>;
-  onRestore: (page: DocPage) => Promise<void>;
-  onPermanentDelete: (page: DocPage) => Promise<void>;
 }) {
   const { childrenByParent, rootPages } = useMemo(() => {
     const ids = new Set(pages.map((page) => page.id));
@@ -320,28 +317,10 @@ function PageTreeSection({
 
   return (
     <section className="space-y-1">
-      <div className="flex items-center justify-between gap-1 px-1.5">
+      <div className="px-1.5">
         <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           Pages
         </span>
-        <div className="flex items-center gap-0.5">
-          <TrashMenu
-            pages={archivedPages}
-            pending={pending}
-            onRestore={onRestore}
-            onPermanentDelete={onPermanentDelete}
-          />
-          <button
-            type="button"
-            onClick={() => void onCreate()}
-            disabled={pending === "create:root"}
-            aria-label="New page"
-            title="New page"
-            className="grid h-6 w-6 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        </div>
       </div>
 
       {!hydrated ? (
@@ -492,77 +471,6 @@ function PageTreeNode({
   );
 }
 
-function TrashMenu({
-  pages,
-  pending,
-  onRestore,
-  onPermanentDelete,
-}: {
-  pages: DocPage[];
-  pending: string | null;
-  onRestore: (page: DocPage) => Promise<void>;
-  onPermanentDelete: (page: DocPage) => Promise<void>;
-}) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Open trash"
-          title="Trash"
-          className="flex h-6 items-center gap-1 rounded-[8px] px-1 text-[11px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          {pages.length > 0 && <span className="tabular-nums">{pages.length}</span>}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 p-2">
-        <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          Trash
-        </div>
-        {pages.length === 0 ? (
-          <p className="px-1 py-2 text-[12px] text-muted-foreground">Trash is empty.</p>
-        ) : (
-          <ul className="max-h-72 space-y-1 overflow-y-auto">
-            {pages.map((page) => (
-              <li key={page.id} className="rounded-md border bg-background/60 p-1.5">
-                <div className="flex min-w-0 items-center gap-2">
-                  <PageIcon page={page} />
-                  <span className="min-w-0 flex-1 truncate text-[12px]">
-                    {page.title || (
-                      <span className="italic text-muted-foreground/70">Untitled</span>
-                    )}
-                  </span>
-                </div>
-                <div className="mt-1 flex items-center justify-end gap-1">
-                  <button
-                    type="button"
-                    onClick={() => void onRestore(page)}
-                    disabled={pending === `restore:${page.id}`}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    Restore
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onPermanentDelete(page)}
-                    disabled={pending === `delete:${page.id}`}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    Delete forever
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 function PageIcon({ page }: { page: DocPage }) {
   if (page.icon) return <span className="shrink-0 text-sm leading-none">{page.icon}</span>;
   return <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
@@ -587,13 +495,19 @@ function hasActiveDescendant(
 function SpecArtifactSection({
   label,
   artifacts,
+  createTypes,
+  pending,
   repoSlug,
   currentPath,
+  onCreate,
 }: {
   label: string;
   artifacts: SpecWorkspaceSection["artifacts"];
+  createTypes: SpecArtifactType[];
+  pending: string | null;
   repoSlug: string;
   currentPath: string;
+  onCreate: (type: SpecArtifactType) => Promise<void>;
 }) {
   const hasActiveArtifact = artifacts.some(
     (artifact) => currentPath === specArtifactHref(repoSlug, artifact),
@@ -604,25 +518,31 @@ function SpecArtifactSection({
     if (hasActiveArtifact) setOpen(true);
   }, [hasActiveArtifact]);
 
-  if (artifacts.length === 0) return null;
+  if (artifacts.length === 0 && createTypes.length === 0) return null;
 
   return (
     <section>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className={cn(
-          "flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground",
-          hasActiveArtifact && "text-foreground",
+      <div className="group flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground",
+            hasActiveArtifact && "text-foreground",
+          )}
+        >
+          <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
+          <span className="flex-1 truncate">{label}</span>
+        </button>
+        {createTypes.length > 0 && (
+          <SpecCreateMenu
+            createTypes={createTypes}
+            pending={pending}
+            onCreate={onCreate}
+          />
         )}
-      >
-        <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
-        <span className="flex-1 truncate">{label}</span>
-        <span className="text-[10px] tabular-nums text-muted-foreground/70">
-          {artifacts.length}
-        </span>
-      </button>
+      </div>
       {open && (
         <ul className="mt-1 border-l pl-1.5">
           {artifacts.map((artifact) => (
@@ -636,6 +556,61 @@ function SpecArtifactSection({
         </ul>
       )}
     </section>
+  );
+}
+
+function SpecCreateMenu({
+  createTypes,
+  pending,
+  onCreate,
+}: {
+  createTypes: SpecArtifactType[];
+  pending: string | null;
+  onCreate: (type: SpecArtifactType) => Promise<void>;
+}) {
+  if (createTypes.length === 1) {
+    const type = createTypes[0];
+    return (
+      <button
+        type="button"
+        onClick={() => void onCreate(type)}
+        disabled={pending === `spec-create:${type}`}
+        aria-label={`New ${SPEC_TYPE_LABELS[type]}`}
+        title={`New ${SPEC_TYPE_LABELS[type]}`}
+        className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground opacity-0 transition-colors hover:bg-sidebar-accent hover:text-foreground focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Plus className="h-3.5 w-3.5" />
+      </button>
+    );
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="New workspace document"
+          title="New workspace document"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground opacity-0 transition-colors hover:bg-sidebar-accent hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-52 p-1">
+        {createTypes.map((type) => (
+          <button
+            key={type}
+            type="button"
+            onClick={() => void onCreate(type)}
+            disabled={pending === `spec-create:${type}`}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            New {SPEC_TYPE_LABELS[type]}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 

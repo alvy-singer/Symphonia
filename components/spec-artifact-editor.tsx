@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { Save } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { MarkdownEditor } from "@/components/editor/markdown-editor";
+import type { DocPage } from "@/lib/docs-store";
 import type {
   SpecArtifact,
   SpecArtifactStatus,
@@ -34,6 +34,10 @@ const TYPE_LABELS: Record<SpecArtifactType, string> = {
   decision: "Decision",
 };
 
+type ArtifactEditorPatch = Partial<
+  Pick<DocPage, "title" | "body" | "icon" | "cover" | "published">
+>;
+
 async function fetchArtifact(
   repoKey: string,
   type: string,
@@ -55,7 +59,13 @@ async function fetchArtifact(
 async function saveArtifact(
   repoKey: string,
   artifact: SpecArtifact,
-  payload: { title: string; status: SpecArtifactStatus; body: string },
+  payload: {
+    title: string;
+    status: SpecArtifactStatus;
+    body: string;
+    icon?: string;
+    cover?: string;
+  },
 ): Promise<SpecArtifact> {
   const res = await fetch(
     `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/artifacts/${encodeURIComponent(
@@ -69,6 +79,8 @@ async function saveArtifact(
         metadata: {
           title: payload.title,
           status: payload.status,
+          icon: payload.icon ?? "",
+          cover: payload.cover ?? "",
         },
       }),
     },
@@ -89,16 +101,10 @@ export function SpecArtifactEditor({
   artifactType: string;
   artifactId: string;
 }) {
-  const repoSlug = repoKey.toLowerCase();
   const [artifact, setArtifact] = useState<SpecArtifact | null>(null);
-  const [title, setTitle] = useState("");
-  const [status, setStatus] = useState<SpecArtifactStatus>("draft");
-  const [body, setBody] = useState("");
-  const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [statusPending, setStatusPending] = useState<SpecArtifactStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,11 +114,6 @@ export function SpecArtifactEditor({
       .then((next) => {
         if (cancelled) return;
         setArtifact(next);
-        setTitle(next.title);
-        setStatus(next.status);
-        setBody(next.body);
-        setDirty(false);
-        setNotice(null);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not load document");
@@ -125,29 +126,51 @@ export function SpecArtifactEditor({
     };
   }, [repoKey, artifactType, artifactId]);
 
-  const onSave = async () => {
-    if (!artifact || !title.trim()) return;
-    setPending(true);
-    setError(null);
-    try {
+  const editorPage = useMemo(() => {
+    if (!artifact) return null;
+    return artifactToPage(repoKey, artifact);
+  }, [artifact, repoKey]);
+
+  const persistPatch = useCallback(
+    async (patch: ArtifactEditorPatch) => {
+      if (!artifact) return;
+      setError(null);
       const updated = await saveArtifact(repoKey, artifact, {
-        title: title.trim(),
-        status,
-        body,
+        title: (patch.title ?? artifact.title).trim() || "Untitled",
+        status: statusForPatch(artifact.type, artifact.status, patch.published),
+        body: patch.body ?? artifact.body,
+        icon: patch.icon,
+        cover: patch.cover,
       });
       setArtifact(updated);
-      setTitle(updated.title);
-      setStatus(updated.status);
-      setBody(updated.body);
-      setDirty(false);
-      setNotice("Document saved.");
       window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save document");
-    } finally {
-      setPending(false);
-    }
-  };
+    },
+    [artifact, repoKey],
+  );
+
+  const updateStatus = useCallback(
+    async (nextStatus: SpecArtifactStatus) => {
+      if (!artifact) return;
+      setStatusPending(nextStatus);
+      setError(null);
+      try {
+        const updated = await saveArtifact(repoKey, artifact, {
+          title: artifact.title,
+          status: nextStatus,
+          body: artifact.body,
+          icon: stringMeta(artifact.metadata.icon),
+          cover: stringMeta(artifact.metadata.cover),
+        });
+        setArtifact(updated);
+        window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not save document");
+      } finally {
+        setStatusPending(null);
+      }
+    },
+    [artifact, repoKey],
+  );
 
   if (loading) {
     return (
@@ -157,7 +180,7 @@ export function SpecArtifactEditor({
     );
   }
 
-  if (!artifact) {
+  if (!artifact || !editorPage) {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
         {error ?? "Document not found"}
@@ -166,87 +189,57 @@ export function SpecArtifactEditor({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs">
-        <Link
-          href={`/r/${repoSlug}/tasks`}
-          className="text-muted-foreground hover:text-foreground"
+    <MarkdownEditor
+      page={editorPage}
+      onPersist={persistPatch}
+      onPersistError={(err) => {
+        setError(err instanceof Error ? err.message : "Could not save document");
+      }}
+      showPageActions
+      stateRevision={artifact.status}
+      actionsMenuContent={
+        <StatusMenu
+          status={artifact.status}
+          pending={statusPending}
+          onSelect={(nextStatus) => void updateStatus(nextStatus)}
+        />
+      }
+      bodyPlaceholder={`Enter ${TYPE_LABELS[artifact.type].toLowerCase()} notes or type '/' for commands`}
+      belowBodySlot={error ? <Notice tone="warn">{error}</Notice> : null}
+    />
+  );
+}
+
+function StatusMenu({
+  status,
+  pending,
+  onSelect,
+}: {
+  status: SpecArtifactStatus;
+  pending: SpecArtifactStatus | null;
+  onSelect: (status: SpecArtifactStatus) => void;
+}) {
+  return (
+    <div>
+      <div className="px-2 pb-1 pt-1 text-[11px] font-medium text-muted-foreground">
+        Status
+      </div>
+      {(Object.keys(STATUS_LABELS) as SpecArtifactStatus[]).map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onSelect(option)}
+          disabled={pending !== null || option === status}
+          className={cn(
+            "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50",
+            option === status ? "text-foreground" : "text-muted-foreground",
+          )}
         >
-          Planning
-        </Link>
-        <span className="text-muted-foreground">/</span>
-        <span className="text-muted-foreground">{TYPE_LABELS[artifact.type]}</span>
-        <span className="text-muted-foreground">/</span>
-        <span className="font-mono text-muted-foreground">{artifact.id}</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">Saved in repository</span>
-      </header>
-
-      {error && <Notice tone="warn">{error}</Notice>}
-      {notice && !error && <Notice tone="ok">{notice}</Notice>}
-
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-4 py-5 sm:px-8">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="rounded-full border px-2 py-0.5">{TYPE_LABELS[artifact.type]}</span>
-            <span className="rounded-full border px-2 py-0.5">{STATUS_LABELS[status]}</span>
-            {artifact.source && (
-              <span className="rounded-full border px-2 py-0.5">Source: {artifact.source}</span>
-            )}
-          </div>
-
-          <input
-            value={title}
-            onChange={(event) => {
-              setTitle(event.target.value);
-              setDirty(true);
-            }}
-            aria-label="Document title"
-            className="mt-4 w-full bg-transparent text-3xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/40"
-          />
-
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-y py-2">
-            <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-              Status
-              <select
-                value={status}
-                onChange={(event) => {
-                  setStatus(event.target.value as SpecArtifactStatus);
-                  setDirty(true);
-                }}
-                className="rounded-md border bg-background px-2 py-1 text-xs text-foreground"
-              >
-                {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              onClick={onSave}
-              disabled={!dirty || pending || !title.trim()}
-              className={cn(
-                "ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-muted",
-                "disabled:cursor-not-allowed disabled:opacity-50",
-              )}
-            >
-              <Save className="h-3.5 w-3.5" />
-              {pending ? "Saving..." : dirty ? "Save changes" : "Saved"}
-            </button>
-          </div>
-
-          <textarea
-            value={body}
-            onChange={(event) => {
-              setBody(event.target.value);
-              setDirty(true);
-            }}
-            spellCheck={false}
-            aria-label="Document body"
-            className="mt-4 min-h-[58svh] w-full resize-y rounded-md border bg-background p-3 font-mono text-[13px] leading-6 outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-      </main>
+          <span className="truncate">{STATUS_LABELS[option]}</span>
+          {option === status && <span className="text-[10px] text-muted-foreground">Current</span>}
+          {pending === option && <span className="text-[10px] text-muted-foreground">Saving</span>}
+        </button>
+      ))}
     </div>
   );
 }
@@ -256,12 +249,12 @@ function Notice({
   children,
 }: {
   tone: "ok" | "warn";
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div
       className={cn(
-        "border-b px-4 py-2 text-xs",
+        "mt-4 rounded-md border px-3 py-2 text-xs",
         tone === "ok"
           ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
           : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
@@ -270,4 +263,67 @@ function Notice({
       {children}
     </div>
   );
+}
+
+function artifactToPage(repoKey: string, artifact: SpecArtifact): DocPage {
+  const createdAt = toTimestamp(artifact.createdAt);
+  const updatedAt = toTimestamp(artifact.updatedAt) || createdAt || Date.now();
+  return {
+    id: `spec:${artifact.type}:${artifact.id}`,
+    repo: repoKey,
+    category: "doc",
+    path: artifact.path,
+    title: artifact.title || "Untitled",
+    body: artifact.body,
+    icon: stringMeta(artifact.metadata.icon),
+    cover: stringMeta(artifact.metadata.cover),
+    published: isPublishedStatus(artifact.status),
+    createdAt: createdAt || updatedAt,
+    updatedAt,
+  };
+}
+
+function statusForPatch(
+  type: SpecArtifactType,
+  current: SpecArtifactStatus,
+  published: boolean | undefined,
+): SpecArtifactStatus {
+  if (published === false) return "draft";
+  if (published === true && !isPublishedStatus(current)) return defaultPublishedStatus(type);
+  return current;
+}
+
+function defaultPublishedStatus(type: SpecArtifactType): SpecArtifactStatus {
+  switch (type) {
+    case "discussion":
+      return "in_discussion";
+    case "requirements":
+      return "requirements_ready";
+    case "plan":
+      return "plan_ready";
+    case "task_proposal":
+      return "ready_for_approval";
+    case "task_brief":
+      return "created";
+    case "codebase_map":
+    case "codebase_conventions":
+    case "codebase_architecture":
+    case "milestone":
+    case "decision":
+      return "approved";
+  }
+}
+
+function isPublishedStatus(status: SpecArtifactStatus): boolean {
+  return status !== "draft" && status !== "archived";
+}
+
+function stringMeta(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function toTimestamp(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

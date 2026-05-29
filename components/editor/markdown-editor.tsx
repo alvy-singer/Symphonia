@@ -39,12 +39,22 @@ interface Props {
   isDraft?: boolean;
   onSave?: (patch: EditorPatch) => void | Promise<void>;
   onDiscard?: () => void;
+  onPersist?: (patch: EditorPatch) => void | Promise<void>;
+  onPersistError?: (error: unknown) => void;
   /** Hide title editing where the title is fixed. */
   fixedTitle?: boolean;
   /** Optional content rendered above the editor (e.g. cover/header). */
   className?: string;
   /** Slot rendered in the toolbar — used by the workflow editor for templates. */
   rightToolbarSlot?: React.ReactNode;
+  /** Slot rendered after the save indicator. */
+  afterSaveStatusSlot?: React.ReactNode;
+  /** Force the Publish/actions controls on or off. Defaults to saved doc pages only. */
+  showPageActions?: boolean;
+  /** Optional replacement for the default page actions menu content. */
+  actionsMenuContent?: React.ReactNode;
+  /** Reset editor state when external metadata changes without changing page id. */
+  stateRevision?: string | number;
   /** Slot rendered below the body, such as a validation panel. */
   belowBodySlot?: React.ReactNode;
   /** Override placeholder for body. */
@@ -76,9 +86,15 @@ export function MarkdownEditor({
   isDraft,
   onSave,
   onDiscard,
+  onPersist,
+  onPersistError,
   fixedTitle,
   className,
   rightToolbarSlot,
+  afterSaveStatusSlot,
+  showPageActions,
+  actionsMenuContent,
+  stateRevision,
   belowBodySlot,
   bodyPlaceholder,
 }: Props) {
@@ -186,7 +202,7 @@ export function MarkdownEditor({
     setPublished(page.published);
     setSavedAt(page.updatedAt);
     setDirty(false);
-  }, [page.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page.id, stateRevision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentPatch = useCallback(
     (overrides: EditorPatch = {}): EditorPatch => ({
@@ -203,12 +219,18 @@ export function MarkdownEditor({
   const persistCurrent = useCallback(
     (overrides: EditorPatch = {}) => {
       const patch = currentPatch(overrides);
-      update(page.id, patch);
+      if (onPersist) {
+        Promise.resolve(onPersist(patch)).catch((err) => {
+          onPersistError?.(err);
+        });
+      } else {
+        update(page.id, patch);
+      }
       setSavedAt(Date.now());
       setDirty(false);
       return patch;
     },
-    [currentPatch, page.id, update],
+    [currentPatch, onPersist, onPersistError, page.id, update],
   );
 
   // Debounced autosave to store.
@@ -336,10 +358,10 @@ export function MarkdownEditor({
 
   const deleteCurrentPage = async () => {
     await archivePage(page.id);
-    router.push(`/r/${page.repo.toLowerCase()}/docs`);
+    router.push(`/r/${page.repo.toLowerCase()}`);
   };
 
-  const showDocActions = !isDraft && page.category === "doc";
+  const showDocActions = showPageActions ?? (!isDraft && page.category === "doc");
 
   return (
     <div className={cn("flex h-full flex-col", className)}>
@@ -368,7 +390,7 @@ export function MarkdownEditor({
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-4 sm:px-8 pb-16">
           {/* Affordances above title */}
-          <div className="-mt-6 flex items-center gap-1.5">
+          <div className={cn("flex items-center gap-1.5", cover ? "-mt-6" : "mt-3")}>
             <div className="relative">
               <button
                 onClick={() => setIconOpen((v) => !v)}
@@ -463,6 +485,7 @@ export function MarkdownEditor({
             <div className="ml-auto flex items-center gap-2">
               {rightToolbarSlot}
               <SaveStatus dirty={dirty} savedAt={savedAt} isDraft={!!isDraft} />
+              {afterSaveStatusSlot}
               {showDocActions && (
                 <>
                   <button
@@ -489,14 +512,16 @@ export function MarkdownEditor({
                       </button>
                     </PopoverTrigger>
                     <PopoverContent align="end" className="w-44 p-1">
-                      <button
-                        type="button"
-                        onClick={() => void deleteCurrentPage()}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                      </button>
+                      {actionsMenuContent ?? (
+                        <button
+                          type="button"
+                          onClick={() => void deleteCurrentPage()}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      )}
                     </PopoverContent>
                   </Popover>
                 </>
