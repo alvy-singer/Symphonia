@@ -3,10 +3,9 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
   Deterministic Clarise bridge from an approved milestone plan to task files.
   """
 
-  alias SymphoniaService.Harness.Automation
+  alias SymphoniaService.Readiness.RepositoryReadiness
   alias SymphoniaService.SpecWorkspace.Store
-  alias SymphoniaService.Validation.Policy, as: ValidationPolicy
-  alias SymphoniaService.{SpecWorkspace, TaskStore, Workspace}
+  alias SymphoniaService.{SpecWorkspace, TaskStore}
 
   @generated_by "clarise_plan_to_task"
   @generation_version "v2"
@@ -635,6 +634,8 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
         "proposal_items" => Enum.map(items, &item_metadata/1),
         "blockers" => readiness["blockers"],
         "warnings" => readiness["warnings"],
+        "readiness_labels" =>
+          Map.merge(readiness["labels"] || %{}, sources_readiness_labels(sources)),
         "created_tasks" => created_tasks,
         "body" => proposal_body(sources, items, created_tasks, readiness)
       }
@@ -666,7 +667,12 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
       "automationReadiness" => %{
         "ready" => blockers == [],
         "blockers" => blockers,
-        "warnings" => warnings
+        "warnings" => warnings,
+        "labels" =>
+          Map.merge(
+            sources_readiness_labels(sources),
+            readiness_labels_from_items(items)
+          )
       },
       "nextStep" => next_step,
       "taskBoard" => task_board_payload(sources.milestone["id"], created_tasks)
@@ -711,6 +717,25 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
 
     #{Enum.join(source_artifact_lines(sources), "\n")}
     """
+  end
+
+  defp sources_readiness_labels(sources) do
+    %{
+      "sourceMilestoneApproved" =>
+        sources.milestone["status"] == "approved" or
+          get_in(sources.milestone, ["metadata", "status"]) == "approved",
+      "dependenciesComplete" => true
+    }
+  end
+
+  defp readiness_labels_from_items(items) do
+    items
+    |> Enum.map(& &1.automation_readiness)
+    |> Enum.find(&is_map/1)
+    |> case do
+      %{"labels" => labels} when is_map(labels) -> labels
+      _ -> %{}
+    end
   end
 
   defp proposal_item_body(item) do
@@ -786,46 +811,7 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
   end
 
   defp readiness(repository) do
-    workspace = Workspace.state(repository)
-    workflow = Workspace.workflow(repository)
-
-    blockers =
-      []
-      |> maybe_add_blocker(
-        workspace["missingDirectories"] not in [nil, []],
-        "Repository workspace folders are missing."
-      )
-      |> maybe_add_blocker(
-        workflow["exists"] != true,
-        "WORKFLOW.md is missing."
-      )
-      |> maybe_add_blocker(
-        workflow["exists"] == true && String.trim(workflow["body"] || "") == "",
-        "WORKFLOW.md is empty."
-      )
-      |> maybe_add_blocker(
-        !Automation.enabled?(repository),
-        "Repository automation is disabled."
-      )
-      |> maybe_add_blocker(
-        !github_linked?(repository),
-        "Repository is not linked to GitHub."
-      )
-
-    validation_policy = ValidationPolicy.load(repository["path"] || "")
-
-    warnings =
-      []
-      |> maybe_add_blocker(
-        validation_policy["source"] == "not_configured",
-        "No machine validation command was configured."
-      )
-
-    %{
-      "ready" => blockers == [],
-      "blockers" => Enum.uniq(blockers),
-      "warnings" => Enum.uniq(warnings)
-    }
+    RepositoryReadiness.compiler_readiness(repository)
   end
 
   defp put_item_readiness(item, readiness) do
@@ -833,10 +819,19 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
   end
 
   defp readiness_markdown(%{"blockers" => [], "warnings" => []}) do
-    "Ready: no obvious blockers found. Harness eligibility remains authoritative after task creation."
+    """
+    Repository ready: yes
+    GitHub linked: yes
+    Validation configured: yes
+
+    Ready: no obvious blockers found. Harness eligibility remains authoritative after task creation.
+    """
+    |> String.trim()
   end
 
   defp readiness_markdown(readiness) do
+    labels = readiness["labels"] || %{}
+
     blockers =
       case readiness["blockers"] do
         [] -> "- None."
@@ -850,6 +845,11 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
       end
 
     """
+    Repository ready: #{yes_no(labels["repositoryReady"])}
+    GitHub linked: #{yes_no(labels["githubLinked"])}
+    Automation enabled: #{yes_no(labels["automationEnabled"])}
+    Validation configured: #{yes_no(labels["validationConfigured"])}
+
     Blockers:
     #{blockers}
 
@@ -860,6 +860,10 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
     """
     |> String.trim()
   end
+
+  defp yes_no(true), do: "yes"
+  defp yes_no(false), do: "no"
+  defp yes_no(_value), do: "unknown"
 
   defp detailed_plan?(body) do
     implementation_details(body) |> length() >= 4
@@ -1028,9 +1032,6 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
     end
   end
 
-  defp maybe_add_blocker(values, true, message), do: values ++ [message]
-  defp maybe_add_blocker(values, _condition, _message), do: values
-
   defp maybe_override(item, _key, nil), do: item
   defp maybe_override(item, key, value), do: Map.put(item, key, value)
 
@@ -1169,12 +1170,6 @@ defmodule SymphoniaService.Clarise.PlanToTaskCompiler do
   defp camel_key("implementation_notes"), do: "implementationNotes"
   defp camel_key("linked_files"), do: "linkedFiles"
   defp camel_key(key), do: key
-
-  defp github_linked?(%{"github" => %{"owner" => owner, "name" => name}})
-       when is_binary(owner) and is_binary(name),
-       do: true
-
-  defp github_linked?(_repository), do: false
 
   defp proposal_id(milestone_id), do: "#{milestone_id}-task-proposal"
   defp generation_id(milestone_id), do: "#{milestone_id}-plan-to-task-#{@generation_version}"

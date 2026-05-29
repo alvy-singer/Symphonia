@@ -11,12 +11,14 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
 
   @disabled_reason "Not runnable by Harness V1."
 
-  def harness_status do
+  def harness_status(opts \\ []) do
+    mode = Keyword.get(opts, :mode, :normal)
+
     %{
       "defaultProvider" => "codex_app_server",
       "runnableProvider" => "codex_app_server",
       "providers" => [
-        codex_app_server_status(),
+        codex_app_server_status(mode),
         disabled_provider("claude_code", "Claude Code"),
         disabled_provider("gemini", "Gemini"),
         disabled_provider("cursor", "Cursor")
@@ -24,7 +26,25 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
     }
   end
 
-  defp codex_app_server_status do
+  def readiness_status(opts \\ []), do: harness_status(opts)
+
+  defp codex_app_server_status(:check_only) do
+    readiness = AppServerClient.check_ready(start?: false)
+
+    %{
+      "id" => "codex_app_server",
+      "label" => "Codex App Server",
+      "configured" => readiness["configured"],
+      "ready" => readiness["ready"],
+      "runnable" => true,
+      "schemaAvailable" => readiness["schemaAvailable"],
+      "binaryAvailable" => readiness["binaryAvailable"],
+      "daemonReachable" => readiness["daemonReachable"],
+      "reason" => safe_reason(readiness["reason"])
+    }
+  end
+
+  defp codex_app_server_status(_mode) do
     case codex_app_server_ready?() do
       :ok ->
         %{
@@ -82,4 +102,12 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
   defp truthy?("true"), do: true
   defp truthy?("1"), do: true
   defp truthy?(_value), do: false
+
+  defp safe_reason(reason) when is_binary(reason) do
+    reason
+    |> String.replace(~r/[A-Z_]{3,}[A-Z0-9_]*=/, "setting=")
+    |> String.replace(~r/(\/[A-Za-z0-9._@%+~:-]+)+/, "[local path]")
+  end
+
+  defp safe_reason(_reason), do: "Codex readiness could not be confirmed."
 end

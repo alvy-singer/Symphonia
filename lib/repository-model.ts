@@ -225,3 +225,61 @@ export interface WorkflowFile {
   body: string;
   templates: WorkflowTemplate[];
 }
+
+export type RepositoryReadinessState = "ready" | "needs_setup" | "blocked" | "warning";
+
+export type RepositoryReadinessCheckStatus =
+  | "passed"
+  | "warning"
+  | "failed"
+  | "not_checked";
+
+export type RepositoryReadinessCategory =
+  | "workspace"
+  | "planning"
+  | "automation"
+  | "provider"
+  | "validation"
+  | "github"
+  | "review";
+
+export type RepositoryReadinessActionKind =
+  | "navigate"
+  | "run_check"
+  | "create_file"
+  | "connect"
+  | "enable";
+
+export interface RepositoryReadinessAction {
+  id: string;
+  label: string;
+  href?: string;
+  kind: RepositoryReadinessActionKind;
+}
+
+export interface RepositoryReadinessCheck {
+  id: string;
+  label: string;
+  status: RepositoryReadinessCheckStatus;
+  category: RepositoryReadinessCategory;
+  detail: string;
+  action?: RepositoryReadinessAction;
+}
+
+export interface RepositoryScannerAdvisory {
+  detected: string[];
+  files: string[];
+  scripts: string[];
+  suggestedValidation: {
+    label: string;
+    command: string;
+  }[];
+}
+
+export interface RepositoryReadiness {
+  state: RepositoryReadinessState;
+  summary: string;
+  checks: RepositoryReadinessCheck[];
+  nextActions: RepositoryReadinessAction[];
+  scan?: RepositoryScannerAdvisory;
+}

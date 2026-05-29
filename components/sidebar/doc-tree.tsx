@@ -4,16 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Archive,
   ChevronRight,
   FileText,
   GitBranch,
-  MoreHorizontal,
   Plus,
+  Trash2,
 } from "lucide-react";
 import type {
   SpecArtifact,
-  SpecArtifactStatus,
   SpecArtifactSummary,
   SpecArtifactType,
   SpecWorkspacePayload,
@@ -53,17 +51,6 @@ const SPEC_TYPE_LABELS: Record<SpecArtifactType, string> = {
   task_proposal: "Task proposal",
   task_brief: "Task brief",
   decision: "Decision",
-};
-
-const SPEC_STATUS_LABELS: Record<SpecArtifactStatus, string> = {
-  draft: "Draft",
-  in_discussion: "In discussion",
-  requirements_ready: "Requirements ready",
-  plan_ready: "Plan ready",
-  ready_for_approval: "Ready for approval",
-  approved: "Approved",
-  created: "Created",
-  archived: "Archived",
 };
 
 /**
@@ -272,7 +259,6 @@ export function DocTree({ repoKey }: Props) {
           </button>
         </div>
       )}
-
     </div>
   );
 }
@@ -425,29 +411,16 @@ function PageTreeNode({
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
-        <Popover>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              aria-label={`Page actions for ${page.title || "Untitled"}`}
-              title="Page actions"
-              className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground opacity-0 transition hover:bg-background/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100"
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-44 p-1">
-            <button
-              type="button"
-              onClick={() => void onArchive(page)}
-              disabled={pending === `archive:${page.id}`}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Archive className="h-3.5 w-3.5" />
-              Delete
-            </button>
-          </PopoverContent>
-        </Popover>
+        <button
+          type="button"
+          onClick={() => void onArchive(page)}
+          disabled={pending === `archive:${page.id}`}
+          aria-label={`Delete ${page.title || "Untitled"}`}
+          title="Delete"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground opacity-0 transition hover:bg-background/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {hasChildren && open && (
@@ -636,10 +609,6 @@ function SpecArtifactNode({
           {artifact.title || (
             <span className="italic text-muted-foreground/70">Untitled</span>
           )}
-        </span>
-        <span className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
-          <span className="truncate">{SPEC_TYPE_LABELS[artifact.type]}</span>
-          <span>{SPEC_STATUS_LABELS[artifact.status]}</span>
         </span>
       </Link>
     </li>

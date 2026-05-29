@@ -19,6 +19,20 @@ const tempDir = await mkdtemp(join(tmpdir(), "symphonia-harness-ui-"));
 const compiledPath = join(tempDir, "harness-ui-model.cjs");
 await writeFile(compiledPath, compiled.outputText);
 
+const readinessSource = await readFile(
+  new URL("../lib/readiness-ui-model.ts", import.meta.url),
+  "utf8",
+);
+const readinessCompiled = ts.transpileModule(readinessSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    importsNotUsedAsValues: ts.ImportsNotUsedAsValues.Remove,
+  },
+});
+const readinessCompiledPath = join(tempDir, "readiness-ui-model.cjs");
+await writeFile(readinessCompiledPath, readinessCompiled.outputText);
+
 const require = createRequire(import.meta.url);
 const {
   activeRunPollingTarget,
@@ -50,6 +64,14 @@ const {
   validationSummaryLabel,
   validationSummaryState,
 } = require(compiledPath);
+
+const {
+  groupReadinessChecks,
+  readinessBlocksAutomation,
+  readinessPrimaryAction,
+  readinessSummary,
+  readinessTone,
+} = require(readinessCompiledPath);
 
 function task(attrs = {}) {
   return {
@@ -533,15 +555,71 @@ test("task page copy separates Clarise planning from Codex implementation and hi
 test("task board uses shared review gate helpers without opening SSE streams", async () => {
   const tasksView = await readFile(new URL("../components/tasks-view.tsx", import.meta.url), "utf8");
   const settingsView = await readFile(new URL("../components/settings-view.tsx", import.meta.url), "utf8");
+  const readinessView = await readFile(
+    new URL("../components/repository-readiness.tsx", import.meta.url),
+    "utf8",
+  );
 
   assert.match(tasksView, /reviewGateLabel/);
   assert.match(tasksView, /reviewGateState/);
   assert.match(tasksView, /validationBadgeForTask/);
   assert.match(tasksView, /taskOperationalBadge/);
+  assert.match(tasksView, /RepositoryReadinessTaskBanner/);
   assert.doesNotMatch(tasksView, /EventSource/);
   assert.match(settingsView, /Pause Harness/);
   assert.match(settingsView, /Resume Harness/);
   assert.match(settingsView, /Run check now/);
   assert.match(settingsView, /Recent decisions/);
   assert.match(settingsView, /groupHarnessDecisions/);
+  assert.match(settingsView, /RepositoryReadinessDetails/);
+  assert.match(readinessView, /Repository readiness/);
+  assert.match(readinessView, /Scanner advisory/);
+  assert.doesNotMatch(readinessView, /workspacePath|codexThreadId|turnId|threadId|raw_log|provider_output/);
+});
+
+test("repository readiness helpers prioritize blockers and group checks", () => {
+  const readiness = {
+    state: "needs_setup",
+    summary: "Setup needed",
+    nextActions: [],
+    checks: [
+      {
+        id: "validation_policy",
+        label: "Validation",
+        status: "warning",
+        category: "validation",
+        detail: "No validation command is configured.",
+        action: { id: "configure_validation", label: "Configure validation", href: "/workflow", kind: "navigate" },
+      },
+      {
+        id: "github_linked",
+        label: "GitHub linked",
+        status: "failed",
+        category: "github",
+        detail: "Repository is not linked to GitHub.",
+        action: { id: "connect_github", label: "Connect GitHub", href: "/settings", kind: "connect" },
+      },
+      {
+        id: "workflow_exists",
+        label: "WORKFLOW.md exists",
+        status: "failed",
+        category: "workspace",
+        detail: "WORKFLOW.md is missing.",
+        action: { id: "create_workflow", label: "Create WORKFLOW.md", href: "/readiness/workflow/from-template", kind: "create_file" },
+      },
+    ],
+  };
+
+  assert.equal(readinessSummary(readiness), "0 ready · 1 warnings · 2 blocked");
+  assert.equal(readinessTone("needs_setup"), "blocked");
+  assert.equal(readinessPrimaryAction(readiness).id, "create_workflow");
+  assert.equal(groupReadinessChecks(readiness.checks).github[0].id, "github_linked");
+  assert.equal(readinessBlocksAutomation(readiness), true);
+
+  const githubBeforeValidation = {
+    ...readiness,
+    checks: readiness.checks.filter((check) => check.id !== "workflow_exists"),
+  };
+
+  assert.equal(readinessPrimaryAction(githubBeforeValidation).id, "connect_github");
 });

@@ -46,6 +46,24 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
 
   def setup_blocker?(_reason), do: false
 
+  def check_ready(opts \\ []) do
+    schema_available? = schema_available?()
+    binary_status = binary_status(opts)
+    command_override? = app_server_command_override?(opts)
+    binary_available? = command_override? or binary_status["available"]
+    configured? = command_override? or configured_bin?(opts) or binary_status["available"]
+    ready? = schema_available? and binary_available?
+
+    %{
+      "configured" => configured?,
+      "schemaAvailable" => schema_available?,
+      "binaryAvailable" => binary_available?,
+      "daemonReachable" => nil,
+      "ready" => ready?,
+      "reason" => check_ready_reason(ready?, schema_available?, binary_available?, binary_status)
+    }
+  end
+
   def ensure_daemon_ready!(opts \\ []) do
     cond do
       truthy?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")) ->
@@ -382,6 +400,61 @@ defmodule SymphoniaService.CodingAssistant.AppServerClient do
   defp app_server_command_override?(opts) do
     command = Keyword.get(opts, :command) || System.get_env("SYMPHONIA_CODEX_APP_SERVER_COMMAND")
     not is_nil(nonblank(command))
+  end
+
+  defp schema_available? do
+    Enum.all?(@schema_files, fn file ->
+      schema_root() |> Path.join(file) |> File.exists?()
+    end)
+  end
+
+  defp binary_status(opts) do
+    cond do
+      truthy?(System.get_env("SYMPHONIA_CODEX_APP_SERVER_SKIP_DAEMON")) ->
+        %{"available" => true, "reason" => "Codex App Server daemon check is skipped."}
+
+      configured = configured_codex_bin(opts) ->
+        case executable_bin(configured) do
+          {:ok, _path} ->
+            %{"available" => true, "reason" => "Codex binary is available."}
+
+          {:error, reason} ->
+            %{"available" => false, "reason" => reason}
+        end
+
+      executable_file?(managed_standalone_path()) ->
+        %{"available" => true, "reason" => "Managed Codex standalone is available."}
+
+      true ->
+        %{"available" => false, "reason" => @setup_blocker_message}
+    end
+  end
+
+  defp configured_bin?(opts), do: not is_nil(nonblank(configured_codex_bin(opts)))
+
+  defp executable_bin(configured) do
+    cond do
+      Path.type(configured) == :absolute and executable_file?(configured) ->
+        {:ok, configured}
+
+      executable = System.find_executable(configured) ->
+        {:ok, executable}
+
+      true ->
+        {:error, "Codex is not available on this computer."}
+    end
+  end
+
+  defp check_ready_reason(true, _schema_available?, _binary_available?, _binary_status) do
+    "Ready for local Codex runs."
+  end
+
+  defp check_ready_reason(_ready?, false, _binary_available?, _binary_status) do
+    "Codex App Server schema is missing. Regenerate the schema bundle before running Codex."
+  end
+
+  defp check_ready_reason(_ready?, _schema_available?, false, binary_status) do
+    binary_status["reason"] || @setup_blocker_message
   end
 
   defp nonblank(value) when is_binary(value) do

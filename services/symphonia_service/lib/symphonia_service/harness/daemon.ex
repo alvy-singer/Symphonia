@@ -45,6 +45,13 @@ defmodule SymphoniaService.Harness.Daemon do
   def reconcile(name \\ __MODULE__), do: GenServer.call(name, :reconcile, 30_000)
   def status(name \\ __MODULE__), do: GenServer.call(name, :status)
 
+  def peek_status(registry_path \\ SymphoniaService.default_registry_path(), name \\ __MODULE__) do
+    case Process.whereis(name) do
+      nil -> offline_status(registry_path)
+      _pid -> GenServer.call(name, :peek_status)
+    end
+  end
+
   @impl true
   def init(opts) do
     registry_path = Keyword.get(opts, :registry_path, SymphoniaService.default_registry_path())
@@ -81,16 +88,27 @@ defmodule SymphoniaService.Harness.Daemon do
     {:reply, status_payload(state), state}
   end
 
+  def handle_call(:peek_status, _from, state) do
+    state = refresh_local_state(state)
+    {:reply, status_payload(state, :check_only), state}
+  end
+
   def handle_call(:pause, _from, state) do
     local_state = LocalState.pause(state.registry_path)
-    decision = DecisionLog.pause("harness_paused", "Harness paused. No new tasks will be claimed.")
+
+    decision =
+      DecisionLog.pause("harness_paused", "Harness paused. No new tasks will be claimed.")
+
     state = record_decisions(%{state | local_state: local_state}, [decision])
     {:reply, Map.merge(status_payload(state), %{"decisions" => [decision]}), state}
   end
 
   def handle_call(:resume, _from, state) do
     local_state = LocalState.resume(state.registry_path)
-    decision = DecisionLog.pause("harness_resumed", "Harness resumed. Eligible tasks may be claimed.")
+
+    decision =
+      DecisionLog.pause("harness_resumed", "Harness resumed. Eligible tasks may be claimed.")
+
     state = record_decisions(%{state | local_state: local_state}, [decision])
     {:reply, Map.merge(status_payload(state), %{"decisions" => [decision]}), state}
   end
@@ -224,7 +242,10 @@ defmodule SymphoniaService.Harness.Daemon do
       repository == nil ->
         add_decision(
           context,
-          DecisionLog.retry(run["repository"], run["task"], "retry_repository_missing",
+          DecisionLog.retry(
+            run["repository"],
+            run["task"],
+            "retry_repository_missing",
             "Retry skipped because the repository is no longer registered.",
             run_id: run["id"],
             dispatched: false
@@ -234,7 +255,10 @@ defmodule SymphoniaService.Harness.Daemon do
       task == nil ->
         add_decision(
           context,
-          DecisionLog.retry(repository, run["task"], "retry_task_missing",
+          DecisionLog.retry(
+            repository,
+            run["task"],
+            "retry_task_missing",
             "Retry skipped because the task is missing.",
             run_id: run["id"],
             dispatched: false
@@ -246,7 +270,10 @@ defmodule SymphoniaService.Harness.Daemon do
 
         add_decision(
           context,
-          DecisionLog.retry(repository, task, "retry_no_longer_allowed",
+          DecisionLog.retry(
+            repository,
+            task,
+            "retry_no_longer_allowed",
             "Retry skipped because the task now has a handoff, pull request, or terminal state.",
             run_id: run["id"],
             dispatched: false
@@ -256,7 +283,10 @@ defmodule SymphoniaService.Harness.Daemon do
       task["pausedReason"] != "waiting_for_sync" ->
         add_decision(
           context,
-          DecisionLog.retry(repository, task, "retry_not_waiting_for_sync",
+          DecisionLog.retry(
+            repository,
+            task,
+            "retry_not_waiting_for_sync",
             "Retry skipped because the task is not paused for a transient Harness retry.",
             run_id: run["id"],
             dispatched: false
@@ -355,7 +385,10 @@ defmodule SymphoniaService.Harness.Daemon do
       "runId" => run_id
     })
     |> add_decision(
-      DecisionLog.retry(repository, task, "retry_dispatched",
+      DecisionLog.retry(
+        repository,
+        task,
+        "retry_dispatched",
         "Retrying transient Harness failure.",
         run_id: run_id,
         dispatched: true
@@ -565,7 +598,7 @@ defmodule SymphoniaService.Harness.Daemon do
     }
   end
 
-  defp status_payload(state) do
+  defp status_payload(state, provider_mode \\ :normal) do
     counts = Reconciler.counts(state.registry_path, state.reliability_opts)
 
     %{
@@ -578,11 +611,12 @@ defmodule SymphoniaService.Harness.Daemon do
       "activeRuns" => counts["activeRuns"],
       "staleRuns" => counts["staleRuns"],
       "retryScheduled" => counts["retryScheduled"],
-      "providerReadiness" => ProviderCatalog.harness_status(),
+      "providerReadiness" => ProviderCatalog.harness_status(mode: provider_mode),
       "lastHeartbeatAt" => state.last_heartbeat_at,
       "lastDispatch" => state.last_dispatch,
       "lastError" => state.last_error,
-      "lastReconciliation" => state.last_reconciliation || state.local_state["lastReconciliation"],
+      "lastReconciliation" =>
+        state.last_reconciliation || state.local_state["lastReconciliation"],
       "recentDecisions" => Enum.reverse(state.recent_decisions)
     }
   end
@@ -596,6 +630,34 @@ defmodule SymphoniaService.Harness.Daemon do
   end
 
   defp schedule_tick(interval_ms), do: Process.send_after(self(), :tick, interval_ms)
+
+  defp offline_status(registry_path) do
+    local_state = LocalState.load(registry_path)
+    counts = Reconciler.counts(registry_path, reliability_opts([]))
+
+    %{
+      "running" => false,
+      "online" => false,
+      "paused" => local_state["paused"] == true,
+      "mode" => "local_service",
+      "intervalMs" => interval_ms(),
+      "limits" =>
+        public_limits(%{
+          max_claims_per_tick: @max_claims_per_tick,
+          max_claims_per_repo: @max_claims_per_repo,
+          max_concurrent_runs: @max_concurrent_runs
+        }),
+      "activeRuns" => counts["activeRuns"],
+      "staleRuns" => counts["staleRuns"],
+      "retryScheduled" => counts["retryScheduled"],
+      "providerReadiness" => ProviderCatalog.readiness_status(mode: :check_only),
+      "lastHeartbeatAt" => nil,
+      "lastDispatch" => nil,
+      "lastError" => nil,
+      "lastReconciliation" => local_state["lastReconciliation"],
+      "recentDecisions" => []
+    }
+  end
 
   defp interval_ms do
     case Integer.parse(System.get_env("SYMPHONIA_HARNESS_DAEMON_INTERVAL_MS") || "") do

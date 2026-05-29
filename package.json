@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3010",
-    "build": "next build",
+    "build": "NEXT_DIST_DIR=.next-build next build",
     "test:harness-ui": "node --test scripts/harness-ui-model.test.mjs scripts/scroll-fade-viewport.test.mjs scripts/clarise-first-repo.test.mjs",
     "video:studio": "remotion studio remotion/index.ts",
     "video:render": "npm run video:render:all",
@@ -13,7 +13,7 @@
     "video:render:task-review": "remotion render remotion/index.ts TaskToReview out/task-to-review.mp4",
     "video:render:automation": "remotion render remotion/index.ts AutomationControlled out/automation-controlled.mp4",
     "video:render:all": "npm run video:render:connect && npm run video:render:clarise && npm run video:render:task-review && npm run video:render:automation",
-    "start": "next start",
+    "start": "NEXT_DIST_DIR=.next-build next start",
     "lint": "next lint"
   },
   "dependencies": {

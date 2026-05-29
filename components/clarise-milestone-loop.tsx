@@ -73,6 +73,15 @@ type AutomationReadiness = {
   ready: boolean;
   blockers: string[];
   warnings: string[];
+  labels?: {
+    repositoryReady?: boolean;
+    sourceMilestoneApproved?: boolean;
+    dependenciesComplete?: boolean;
+    githubLinked?: boolean;
+    automationEnabled?: boolean;
+    validationConfigured?: boolean;
+    harnessPaused?: boolean;
+  };
 };
 
 type TaskProposalCreatePayload = {
@@ -1088,6 +1097,7 @@ function TaskProposalPanel({
 function HarnessReadinessPanel({ readiness }: { readiness: AutomationReadiness }) {
   const hasWarnings = readiness.warnings.length > 0;
   const hasBlockers = readiness.blockers.length > 0;
+  const labels = readiness.labels;
 
   return (
     <div className="rounded-md border bg-muted/20 px-3 py-3">
@@ -1105,12 +1115,40 @@ function HarnessReadinessPanel({ readiness }: { readiness: AutomationReadiness }
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         This preview estimates obvious setup issues. Harness eligibility remains authoritative after task creation.
       </p>
+      {labels && (
+        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
+          <ReadinessFact label="Repository ready" value={labels.repositoryReady} />
+          <ReadinessFact label="Source milestone approved" value={labels.sourceMilestoneApproved} />
+          <ReadinessFact label="Dependencies complete" value={labels.dependenciesComplete} />
+          <ReadinessFact label="GitHub linked" value={labels.githubLinked} />
+          <ReadinessFact label="Automation enabled" value={labels.automationEnabled} />
+          <ReadinessFact label="Validation configured" value={labels.validationConfigured} />
+        </div>
+      )}
       {(hasBlockers || hasWarnings) && (
         <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
           <ReadinessList title="Blocked" items={readiness.blockers} fallback="No obvious blockers." />
           <ReadinessList title="Warnings" items={readiness.warnings} fallback="No warnings." />
         </div>
       )}
+    </div>
+  );
+}
+
+function ReadinessFact({ label, value }: { label: string; value?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-[8px] border bg-background/70 px-2 py-1.5">
+      <span className="text-muted-foreground">{label}</span>
+      <span
+        className={cn(
+          "font-medium",
+          value === true && "text-emerald-600 dark:text-emerald-400",
+          value === false && "text-amber-700 dark:text-amber-300",
+          value == null && "text-muted-foreground",
+        )}
+      >
+        {value == null ? "Unknown" : value ? "Yes" : "No"}
+      </span>
     </div>
   );
 }
@@ -1346,6 +1384,7 @@ async function fetchExistingTaskProposal(
         ready: metadataList(proposal, "blockers").length === 0,
         blockers: metadataList(proposal, "blockers"),
         warnings: metadataList(proposal, "warnings"),
+        labels: readinessLabelsValue(proposal.metadata.readiness_labels),
       },
     };
   } catch {
@@ -1468,6 +1507,21 @@ function readinessValue(value: unknown): AutomationReadiness | undefined {
     ready: raw.ready === true,
     blockers: normalizeStringList(raw.blockers),
     warnings: normalizeStringList(raw.warnings),
+    labels: readinessLabelsValue(raw.labels),
+  };
+}
+
+function readinessLabelsValue(value: unknown): AutomationReadiness["labels"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  return {
+    repositoryReady: booleanValue(raw.repositoryReady),
+    sourceMilestoneApproved: booleanValue(raw.sourceMilestoneApproved),
+    dependenciesComplete: booleanValue(raw.dependenciesComplete),
+    githubLinked: booleanValue(raw.githubLinked),
+    automationEnabled: booleanValue(raw.automationEnabled),
+    validationConfigured: booleanValue(raw.validationConfigured),
+    harnessPaused: booleanValue(raw.harnessPaused),
   };
 }
 
@@ -1487,6 +1541,11 @@ function normalizeStringList(value: unknown): string[] {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  return undefined;
 }
 
 function metadataString(artifact: SpecArtifact | undefined, key: string): string {

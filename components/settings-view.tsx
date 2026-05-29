@@ -9,6 +9,10 @@ import {
 } from "@/data/mock";
 import type { GitHubConnectionState, RepositoryAutomationState } from "@/lib/repository-model";
 import {
+  RepositoryReadinessCompact,
+  RepositoryReadinessDetails,
+} from "@/components/repository-readiness";
+import {
   groupHarnessDecisions,
   harnessStatusLabel,
   type HarnessDecision,
@@ -169,6 +173,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
                 />
               </Field>
               <SaveBar />
+              <RepositoryReadinessCompact repoKey={repoKey} />
             </Section>
           )}
 
@@ -273,6 +278,7 @@ export function SettingsView({ repoKey }: { repoKey: string }) {
               description="Control local-first Codex execution for this repository."
             >
               <AutomationIntegration repoKey={repoKey} />
+              <RepositoryReadinessDetails repoKey={repoKey} />
               <HarnessPanel />
             </Section>
           )}

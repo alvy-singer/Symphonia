@@ -58,6 +58,7 @@ import {
 } from "react";
 import { cn } from "@/lib/utils";
 import type { ClariseModelProfile, ClariseProviderId } from "@/lib/clarise-chat";
+import { RepositoryReadinessCompact } from "@/components/repository-readiness";
 
 type ArtifactResult = {
   kind: string;
@@ -316,6 +317,7 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
           <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
             <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
               <div className="mx-auto flex max-w-4xl flex-col gap-4">
+                <RepositoryReadinessCompact repoKey={repoKey} />
                 <ThreadPrimitive.Messages>
                   {({ message }) => <ClariseMessage key={message.id} message={message} />}
                 </ThreadPrimitive.Messages>

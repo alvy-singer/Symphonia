@@ -17,6 +17,7 @@ defmodule SymphoniaService.HTTPServer do
   alias SymphoniaService.Clarise.{ArtifactExtractor, MilestoneLoop, PlanToTaskCompiler}
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
   alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
+  alias SymphoniaService.Readiness.{RepositoryReadiness, RepositoryScanner, SetupActions}
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -107,6 +108,15 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "repositories", repo, "workspace"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "workspace" => Workspace.state(repository)}}
+
+      ["api", "repositories", repo, "readiness"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        {200,
+         %{
+           "repo" => repository["key"],
+           "readiness" => RepositoryReadiness.get(repository, registry_path: registry_path)
+         }}
 
       ["api", "repositories", repo, "spec-workspace"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -356,12 +366,25 @@ defmodule SymphoniaService.HTTPServer do
         workspace = Workspace.initialize(repository)
         {200, %{"repo" => repository["key"], "workspace" => workspace}}
 
+      ["api", "repositories", repo, "readiness", "workspace", "initialize"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        readiness = SetupActions.initialize_workspace(repository, registry_path: registry_path)
+        {200, %{"repo" => repository["key"], "readiness" => readiness}}
+
       ["api", "repositories", repo, "spec-workspace", "initialize"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         SpecWorkspace.initialize(repository)
 
         {200,
          %{"repo" => repository["key"], "specWorkspace" => spec_workspace_payload(repository)}}
+
+      ["api", "repositories", repo, "readiness", "spec-workspace", "initialize"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        readiness =
+          SetupActions.initialize_spec_workspace(repository, registry_path: registry_path)
+
+        {200, %{"repo" => repository["key"], "readiness" => readiness}}
 
       ["api", "repositories", repo, "spec-workspace", "artifacts", type] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -478,6 +501,20 @@ defmodule SymphoniaService.HTTPServer do
 
         workflow = Workspace.create_workflow_from_template(repository, template_id)
         {201, %{"repo" => repository["key"], "workflow" => workflow}}
+
+      ["api", "repositories", repo, "readiness", "workflow", "from-template"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        readiness =
+          SetupActions.create_workflow_from_template(repository, decode_json(body),
+            registry_path: registry_path
+          )
+
+        {201, %{"repo" => repository["key"], "readiness" => readiness}}
+
+      ["api", "repositories", repo, "readiness", "scan"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        {200, %{"repo" => repository["key"], "scan" => RepositoryScanner.scan(repository)}}
 
       ["api", "repositories", repo, "tasks"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
