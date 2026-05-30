@@ -23,7 +23,7 @@ interface Props {
 const WORKSPACE_GROUPS = [
   { label: "Codebase", sectionLabels: ["Codebase"] },
   {
-    label: "Milestone",
+    label: "Milestones",
     sectionLabels: ["Milestones", "Discussions", "Requirements", "Task proposals", "Task briefs"],
   },
   { label: "Plans", sectionLabels: ["Plans"] },
