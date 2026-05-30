@@ -265,6 +265,7 @@ export type RepositoryReadinessCategory =
   | "planning"
   | "automation"
   | "provider"
+  | "runner"
   | "validation"
   | "github"
   | "review";

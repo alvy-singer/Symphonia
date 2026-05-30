@@ -39,6 +39,7 @@ const CATEGORY_LABELS: Record<RepositoryReadinessCategory, string> = {
   planning: "Planning",
   automation: "Automation",
   provider: "Codex",
+  runner: "Runner capacity",
   validation: "Validation",
   github: "GitHub",
   review: "Review branches",

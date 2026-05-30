@@ -20,6 +20,7 @@ defmodule SymphoniaService.HTTPServer do
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
   alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
   alias SymphoniaService.Readiness.{RepositoryReadiness, RepositoryScanner, SetupActions}
+  alias SymphoniaService.Runners.{Capabilities, Registry, SelectionPolicy}
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -116,6 +117,12 @@ defmodule SymphoniaService.HTTPServer do
 
   defp route(%{method: "GET", path: path}, registry_path, actor) do
     case path_parts(path) do
+      ["api", "runners"] ->
+        guarded_read(registry_path, actor, global_repository(), "runner.view", fn ->
+          audit_runner_transitions(registry_path, actor)
+          {200, %{"runners" => Registry.list(registry_path)}}
+        end)
+
       ["api", "repositories", repo, "access"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
 
@@ -393,6 +400,99 @@ defmodule SymphoniaService.HTTPServer do
 
   defp route(%{method: "POST", path: path, body: body}, registry_path, actor) do
     case path_parts(path) do
+      ["api", "runners", "register"] ->
+        guarded_runner_action(registry_path, actor, "runner.register", runner_target(), fn ->
+          {:ok, runner} = Registry.register(registry_path, actor, decode_json(body))
+          public = Registry.public(runner)
+
+          {201, %{"runner" => public}, runner_target(public["id"]), runner_metadata(public)}
+        end)
+
+      ["api", "runners", runner_id, "heartbeat"] ->
+        payload = decode_json(body)
+
+        case Registry.heartbeat(registry_path, runner_id, payload["token"], payload) do
+          {:ok, runner, transition} ->
+            public = Registry.public(runner)
+            audit_heartbeat_transition(registry_path, actor, public, transition)
+
+            {200,
+             %{
+               "runner" =>
+                 %{
+                   "id" => public["id"],
+                   "status" => public["status"],
+                   "lastHeartbeatAt" => public["lastHeartbeatAt"]
+                 }
+                 |> reject_nil()
+             }}
+
+          {:error, :invalid_token} ->
+            {403, %{"error" => "Invalid runner token.", "reasonCode" => "invalid_runner_token"}}
+
+          {:error, :not_found} ->
+            {404, %{"error" => "Runner not found.", "reasonCode" => "runner_not_found"}}
+
+          {:error, _reason} ->
+            {400, %{"error" => "Invalid runner heartbeat.", "reasonCode" => "invalid_heartbeat"}}
+        end
+
+      ["api", "runners", runner_id, "disable"] ->
+        guarded_runner_action(
+          registry_path,
+          actor,
+          "runner.disable",
+          runner_target(runner_id),
+          fn ->
+            case Registry.disable(registry_path, runner_id) do
+              {:ok, runner, _meta} ->
+                public = Registry.public(runner)
+                {200, %{"runner" => public}, runner_target(public["id"]), runner_metadata(public)}
+
+              {:error, :local_service_immutable} ->
+                {400,
+                 %{
+                   "error" => "Local service runner cannot be disabled in V1.",
+                   "reasonCode" => "local_service_immutable"
+                 }, runner_target(runner_id),
+                 %{"runnerId" => runner_id, "runnerMode" => "local_service"}}
+
+              {:error, :not_found} ->
+                {404, %{"error" => "Runner not found.", "reasonCode" => "runner_not_found"},
+                 runner_target(runner_id),
+                 %{"runnerId" => runner_id, "runnerMode" => "remote_runner"}}
+            end
+          end
+        )
+
+      ["api", "runners", runner_id, "enable"] ->
+        guarded_runner_action(
+          registry_path,
+          actor,
+          "runner.enable",
+          runner_target(runner_id),
+          fn ->
+            case Registry.enable(registry_path, runner_id) do
+              {:ok, runner, _meta} ->
+                public = Registry.public(runner)
+                {200, %{"runner" => public}, runner_target(public["id"]), runner_metadata(public)}
+
+              {:error, :local_service_immutable} ->
+                {400,
+                 %{
+                   "error" => "Local service runner cannot be enabled in V1.",
+                   "reasonCode" => "local_service_immutable"
+                 }, runner_target(runner_id),
+                 %{"runnerId" => runner_id, "runnerMode" => "local_service"}}
+
+              {:error, :not_found} ->
+                {404, %{"error" => "Runner not found.", "reasonCode" => "runner_not_found"},
+                 runner_target(runner_id),
+                 %{"runnerId" => runner_id, "runnerMode" => "remote_runner"}}
+            end
+          end
+        )
+
       ["api", "github", "connect", "start"] ->
         case Auth.start_device_flow() do
           {:ok, payload} ->
@@ -785,17 +885,13 @@ defmodule SymphoniaService.HTTPServer do
             do: "workspace_provider.experimental_run",
             else: "task.run_codex"
 
-        guarded(
+        start_coding_assistant_run(
           registry_path,
           actor,
           repository,
-          permission,
-          task_target(task_key),
-          fn ->
-            result = CodingAssistant.start_run(registry_path, repository, task_key, payload)
-            {201, %{"run" => result["run"], "task" => public_task(result["task"])}}
-          end,
-          %{"taskKey" => task_key, "workspaceProvider" => workspace_provider(payload)}
+          task_key,
+          payload,
+          permission
         )
 
       [
@@ -900,6 +996,110 @@ defmodule SymphoniaService.HTTPServer do
 
   defp route(_request, _registry_path, _actor), do: {405, %{"error" => "Method not allowed"}}
 
+  defp start_coding_assistant_run(registry_path, actor, repository, task_key, payload, permission) do
+    metadata = %{"taskKey" => task_key, "workspaceProvider" => workspace_provider(payload)}
+
+    case Policy.authorize(actor, permission, repository, task_target(task_key)) do
+      :ok ->
+        with {:ok, runner} <-
+               SelectionPolicy.select_for_run(registry_path, repository, actor,
+                 runner_id: runner_id(payload),
+                 workspace_provider: workspace_provider(payload) || "local_git_worktree",
+                 allow_remote_execution: false
+               ) do
+          try do
+            result =
+              CodingAssistant.start_run(
+                registry_path,
+                repository,
+                task_key,
+                Map.put(payload, "runner", runner)
+              )
+
+            AuditLog.record(registry_path, repository, %{
+              "actor" => actor,
+              "action" => permission,
+              "target" => task_target(task_key),
+              "result" => "completed",
+              "metadata" => metadata
+            })
+
+            {201, %{"run" => result["run"], "task" => public_task(result["task"])}}
+          rescue
+            error ->
+              AuditLog.record(registry_path, repository, %{
+                "actor" => actor,
+                "action" => permission,
+                "target" => task_target(task_key),
+                "result" => "failed",
+                "metadata" => Map.put(metadata, "reasonCode", "exception")
+              })
+
+              reraise error, __STACKTRACE__
+          end
+        else
+          {:error, {status, payload}} ->
+            {status, payload}
+        end
+
+      {:error, payload} ->
+        AuditLog.record(registry_path, repository, %{
+          "actor" => actor,
+          "action" => permission,
+          "target" => task_target(task_key),
+          "result" => "denied",
+          "metadata" => Map.put(metadata, "reasonCode", "permission_denied")
+        })
+
+        {403, payload}
+    end
+  end
+
+  defp guarded_runner_action(registry_path, actor, action, target, fun)
+       when is_function(fun, 0) do
+    repository = global_repository()
+
+    case Policy.authorize(actor, action, repository, target) do
+      :ok ->
+        try do
+          {status, payload, event_target, metadata} = fun.()
+          result = if status in 200..299, do: "completed", else: "failed"
+
+          AuditLog.record(registry_path, repository, %{
+            "actor" => actor,
+            "action" => action,
+            "target" => event_target,
+            "result" => result,
+            "metadata" => metadata
+          })
+
+          {status, payload}
+        rescue
+          error ->
+            AuditLog.record(registry_path, repository, %{
+              "actor" => actor,
+              "action" => action,
+              "target" => target,
+              "result" => "failed",
+              "metadata" => %{"reasonCode" => "exception"}
+            })
+
+            reraise error, __STACKTRACE__
+        end
+
+      {:error, payload} ->
+        AuditLog.record(registry_path, repository, %{
+          "actor" => actor,
+          "action" => action,
+          "target" => target,
+          "result" => "denied",
+          "metadata" => %{"reasonCode" => "permission_denied"}
+        })
+
+        {403, payload}
+    end
+  end
+
   defp guarded(registry_path, actor, repository, permission, target, fun, metadata \\ %{})
        when is_function(fun, 0) do
     case Policy.authorize(actor, permission, repository, target) do
@@ -960,10 +1160,53 @@ defmodule SymphoniaService.HTTPServer do
     end
   end
 
+  defp audit_runner_transitions(registry_path, actor) do
+    registry_path
+    |> Registry.mark_stale()
+    |> Enum.each(fn %{"runner" => runner, "after" => status} ->
+      AuditLog.record(registry_path, global_repository(), %{
+        "actor" => actor,
+        "action" => "runner.heartbeat_stale",
+        "target" => runner_target(runner["id"]),
+        "result" => "completed",
+        "summary" => "Runner heartbeat status changed to #{status}.",
+        "metadata" => Map.put(runner_metadata(runner), "reasonCode", "heartbeat_#{status}")
+      })
+    end)
+  end
+
+  defp audit_heartbeat_transition(registry_path, actor, runner, %{
+         before: before,
+         after: after_status
+       }) do
+    if before != after_status and before in ["stale", "offline"] do
+      AuditLog.record(registry_path, global_repository(), %{
+        "actor" => actor,
+        "action" => "runner.heartbeat_stale",
+        "target" => runner_target(runner["id"]),
+        "result" => "completed",
+        "summary" => "Runner heartbeat status changed to #{after_status}.",
+        "metadata" => Map.put(runner_metadata(runner), "reasonCode", "heartbeat_#{after_status}")
+      })
+    end
+  end
+
+  defp audit_heartbeat_transition(_registry_path, _actor, _runner, _transition), do: :ok
+
   defp repository_target, do: %{"type" => "repository"}
   defp workflow_target(id \\ nil), do: %{"type" => "workflow", "id" => id}
   defp harness_target, do: %{"type" => "harness"}
   defp task_target(task_key), do: %{"type" => "task", "id" => task_key}
+  defp runner_target(id \\ nil), do: %{"type" => "runner", "id" => id}
+  defp global_repository, do: %{"key" => "GLOBAL"}
+
+  defp runner_metadata(runner) do
+    %{
+      "runnerId" => runner["id"],
+      "runnerMode" => runner["mode"],
+      "capabilitySummary" => Capabilities.summary(runner["capabilities"])
+    }
+  end
 
   defp permission_for_task_event("approve"), do: "review.approve"
   defp permission_for_task_event("request_changes"), do: "review.request_changes"
@@ -982,6 +1225,9 @@ defmodule SymphoniaService.HTTPServer do
   end
 
   defp experimental_run?(payload), do: workspace_provider(payload) == "experimental_sandbox"
+
+  defp runner_id(payload) when is_map(payload), do: payload["runnerId"] || payload["runner_id"]
+  defp runner_id(_payload), do: nil
 
   defp workspace_provider(payload) when is_map(payload) do
     payload["workspace_provider"] || payload["workspaceProvider"]
@@ -1031,12 +1277,15 @@ defmodule SymphoniaService.HTTPServer do
   defp reason(403), do: "Forbidden"
   defp reason(404), do: "Not Found"
   defp reason(405), do: "Method Not Allowed"
+  defp reason(409), do: "Conflict"
   defp reason(429), do: "Too Many Requests"
   defp reason(502), do: "Bad Gateway"
   defp reason(_), do: "OK"
 
   defp decode_json(""), do: %{}
   defp decode_json(body), do: JSON.decode!(body)
+
+  defp reject_nil(map), do: Map.reject(map, fn {_key, value} -> is_nil(value) end)
 
   defp public_tasks(tasks), do: Enum.map(tasks, &public_task/1)
 

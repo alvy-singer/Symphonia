@@ -147,6 +147,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "displayStep" => RunEvents.display_step(run),
       "displayMessage" => RunEvents.display_message(run),
       "eligibilityReason" => run["eligibility_reason"],
+      "runner" => public_runner(run["runner"]),
       "workspaceProvider" => run["workspace_provider"],
       "reviewBranch" => run["review_branch"],
       "curatedSummaryPath" => run["curated_summary_path"],
@@ -266,6 +267,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "current_step",
       "workspace_path",
       "workspace_provider",
+      "runner",
       "codex_thread_id",
       "turn_id",
       "eligibility_reason",
@@ -287,6 +289,17 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
 
     Map.update(run, "timeline", [event], &(List.wrap(&1) ++ [event]))
   end
+
+  defp public_runner(%{"id" => id, "mode" => mode, "name" => name})
+       when is_binary(id) and is_binary(mode) and is_binary(name) do
+    %{
+      "id" => String.slice(id, 0, 120),
+      "mode" => String.slice(mode, 0, 80),
+      "name" => String.slice(name, 0, 120)
+    }
+  end
+
+  defp public_runner(_runner), do: nil
 
   defp progress_source_events(run) do
     queued = %{

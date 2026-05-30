@@ -105,11 +105,6 @@ defmodule SymphoniaService.Workspace do
 
   def update_workflow(repository, body) when is_binary(body) do
     path = workflow_path(repository)
-
-    unless File.exists?(path) do
-      raise ArgumentError, "WORKFLOW.md does not exist. Create it from a template first."
-    end
-
     File.write!(path, body)
     workflow(repository)
   end

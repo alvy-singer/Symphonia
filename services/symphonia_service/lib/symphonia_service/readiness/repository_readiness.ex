@@ -11,11 +11,12 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
   alias SymphoniaService.CodingAssistant.ProviderCatalog
   alias SymphoniaService.Harness.{Automation, Daemon}
   alias SymphoniaService.Readiness.RepositoryScanner
+  alias SymphoniaService.Runners.Registry, as: RunnerRegistry
   alias SymphoniaService.Runner.WorkspaceProviders
   alias SymphoniaService.Validation.Policy
   alias SymphoniaService.{SpecWorkspace, TaskStore, Workspace}
 
-  @categories ~w(workspace planning automation provider validation github review)
+  @categories ~w(workspace planning automation provider runner validation github review)
 
   def get(repository, opts \\ []) do
     registry_path = Keyword.get(opts, :registry_path, SymphoniaService.default_registry_path())
@@ -26,6 +27,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
       |> Kernel.++(planning_checks(repository))
       |> Kernel.++(automation_checks(repository, registry_path))
       |> Kernel.++(provider_checks())
+      |> Kernel.++(runner_checks(registry_path))
       |> Kernel.++(validation_checks(repository))
       |> Kernel.++(github_checks(repository))
       |> Kernel.++(review_checks(repository))
@@ -375,6 +377,43 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
           do: "Only Codex App Server is runnable by Harness V2.",
           else: "Non-Codex providers must remain disabled for Harness V2."
         )
+      )
+    ]
+  end
+
+  defp runner_checks(registry_path) do
+    runners = RunnerRegistry.capacity(registry_path)
+    local = runners["localService"] || %{}
+    capabilities = local["capabilities"] || %{}
+
+    [
+      check(
+        "runner.local_service",
+        "Local service runner",
+        if(local["status"] == "online", do: "passed", else: "failed"),
+        "runner",
+        if(local["status"] == "online",
+          do: "Local service is available for Codex runs.",
+          else: "Local service is unavailable for Codex runs."
+        )
+      ),
+      check(
+        "runner.codex",
+        "Codex runner ready",
+        if(capabilities["codexAppServer"] == true, do: "passed", else: "warning"),
+        "runner",
+        if(capabilities["codexAppServer"] == true,
+          do: "Local service can reach the Codex runner.",
+          else: "Codex runner readiness is not confirmed by passive checks."
+        ),
+        if(capabilities["codexAppServer"] == true, do: nil, else: action("setup_codex"))
+      ),
+      check(
+        "runner.remote_execution",
+        "Remote execution",
+        "warning",
+        "runner",
+        "Remote runner registration is available, but remote execution is disabled by default."
       )
     ]
   end

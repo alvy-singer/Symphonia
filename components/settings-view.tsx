@@ -39,6 +39,13 @@ import {
   providerSupportedCapabilityLabels,
 } from "@/lib/provider-ui-model";
 import {
+  runnerCapabilitySummary,
+  runnerCapacityLabel,
+  runnerStatusLabel,
+  runnerStatusTone,
+  type RunnerStatusRow,
+} from "@/lib/runner-model";
+import {
   User as UserIcon,
   Bell,
   Bot,
@@ -472,6 +479,10 @@ interface HarnessStatus {
     runnableProvider?: string;
     providers?: CodingAssistantProviderStatus[];
   };
+  runners?: {
+    localService: RunnerStatusRow;
+    remote: RunnerStatusRow[];
+  };
   lastHeartbeatAt?: string;
   lastDispatch?: {
     at?: string;
@@ -517,6 +528,21 @@ async function postHarnessAction(
     throw new Error(payload.error ?? "Could not update Harness");
   }
   return harness;
+}
+
+async function postRunnerAction(
+  runnerId: string,
+  action: "enable" | "disable",
+): Promise<RunnerStatusRow> {
+  const res = await fetch(`/api/runners/${encodeURIComponent(runnerId)}/${action}`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { runner?: RunnerStatusRow; error?: string };
+  if (!res.ok || !payload.runner) {
+    throw new Error(payload.error ?? "Could not update runner");
+  }
+  return payload.runner;
 }
 
 function AccessPanel({ access }: { access: RepositoryAccess | null }) {
@@ -690,6 +716,7 @@ function HarnessPanel({
   const [status, setStatus] = useState<HarnessStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"pause" | "resume" | "tick" | "reconcile" | null>(null);
+  const [pendingRunnerAction, setPendingRunnerAction] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -724,6 +751,20 @@ function HarnessPanel({
       setError(err instanceof Error ? err.message : "Could not update Harness");
     } finally {
       setPendingAction(null);
+    }
+  };
+
+  const runRunnerAction = async (runner: RunnerStatusRow, action: "enable" | "disable") => {
+    const key = `${runner.id}:${action}`;
+    setPendingRunnerAction(key);
+    setError(null);
+    try {
+      await postRunnerAction(runner.id, action);
+      setStatus(await fetchHarnessStatus());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update runner");
+    } finally {
+      setPendingRunnerAction(null);
     }
   };
 
@@ -818,6 +859,13 @@ function HarnessPanel({
         </div>
       </div>
 
+      <RunnerCapacitySection
+        runners={status?.runners}
+        access={access}
+        pendingAction={pendingRunnerAction}
+        onAction={runRunnerAction}
+      />
+
       <div className="border-t px-3 py-3">
         <div className="mb-2 text-[11px] font-medium uppercase text-muted-foreground">
           Limits
@@ -890,6 +938,125 @@ function HarnessPanel({
           </div>
         ) : (
           <div className="text-xs text-muted-foreground">No Harness decisions yet.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RunnerCapacitySection({
+  runners,
+  access,
+  pendingAction,
+  onAction,
+}: {
+  runners?: HarnessStatus["runners"];
+  access: RepositoryAccess | null;
+  pendingAction: string | null;
+  onAction: (runner: RunnerStatusRow, action: "enable" | "disable") => void;
+}) {
+  const localService = runners?.localService;
+  const remote = runners?.remote ?? [];
+
+  return (
+    <div className="border-t px-3 py-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-[11px] font-medium uppercase text-muted-foreground">
+          Execution capacity
+        </div>
+        {localService && (
+          <StatusPill
+            tone={runnerStatusTone(localService)}
+            label={runnerStatusLabel(localService)}
+          />
+        )}
+      </div>
+
+      <div className="space-y-2">
+        {localService ? (
+          <RunnerRow
+            runner={localService}
+            access={access}
+            pendingAction={pendingAction}
+            onAction={onAction}
+          />
+        ) : (
+          <div className="text-xs text-muted-foreground">Local service capacity is loading.</div>
+        )}
+
+        <div className="pt-1 text-[11px] font-medium uppercase text-muted-foreground">
+          Remote runners
+        </div>
+        {remote.length > 0 ? (
+          remote.map((runner) => (
+            <RunnerRow
+              key={runner.id}
+              runner={runner}
+              access={access}
+              pendingAction={pendingAction}
+              onAction={onAction}
+            />
+          ))
+        ) : (
+          <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs text-muted-foreground">
+            No remote runners connected.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RunnerRow({
+  runner,
+  access,
+  pendingAction,
+  onAction,
+}: {
+  runner: RunnerStatusRow;
+  access: RepositoryAccess | null;
+  pendingAction: string | null;
+  onAction: (runner: RunnerStatusRow, action: "enable" | "disable") => void;
+}) {
+  const isRemote = runner.mode === "remote_runner";
+  const action = runner.status === "disabled" ? "enable" : "disable";
+  const permission = action === "enable" ? "runner.enable" : "runner.disable";
+  const blockedReason = isRemote ? disabledReason(access, permission) : undefined;
+  const pending = pendingAction === `${runner.id}:${action}`;
+
+  return (
+    <div className="rounded-[8px] border bg-background/60 p-2.5 text-xs">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 font-medium">
+            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>{runner.name}</span>
+          </div>
+          <div className="mt-1 text-muted-foreground">{runnerCapabilitySummary(runner)}</div>
+          {isRemote && (
+            <div className="mt-1 text-muted-foreground">
+              Remote execution disabled by default.
+            </div>
+          )}
+        </div>
+        <StatusPill tone={runnerStatusTone(runner)} label={runnerStatusLabel(runner)} />
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="rounded-[7px] border px-2 py-0.5 text-muted-foreground">
+          Capacity {runnerCapacityLabel(runner)}
+        </span>
+        {isRemote && (
+          <button
+            type="button"
+            className="inline-flex h-6 items-center gap-1 rounded-[7px] border px-2 text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={pending || Boolean(blockedReason)}
+            title={blockedReason}
+            onClick={() => onAction(runner, action)}
+          >
+            {action === "enable" ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+            {pending ? "Updating" : action === "enable" ? "Enable" : "Disable"}
+          </button>
         )}
       </div>
     </div>
@@ -1032,7 +1199,7 @@ function StatusPill({
   tone,
 }: {
   label: string;
-  tone: "ready" | "warning" | "neutral";
+  tone: "ready" | "warning" | "blocked" | "neutral";
 }) {
   return (
     <span
@@ -1042,6 +1209,8 @@ function StatusPill({
           "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
         tone === "warning" &&
           "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        tone === "blocked" &&
+          "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
         tone === "neutral" && "text-muted-foreground",
       )}
     >

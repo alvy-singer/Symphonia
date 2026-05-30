@@ -30,7 +30,12 @@ export type PermissionKey =
   | "pull_request.open"
   | "pull_request.refresh"
   | "provider.configure"
-  | "workspace_provider.experimental_run";
+  | "workspace_provider.experimental_run"
+  | "runner.view"
+  | "runner.register"
+  | "runner.enable"
+  | "runner.disable"
+  | "runner.use_remote";
 
 export interface RepositoryAccess {
   role: RepositoryRole;
@@ -48,7 +53,7 @@ export interface AuditEvent {
   repo: string;
   action: string;
   target?: {
-    type: "repository" | "task" | "run" | "review" | "pull_request" | "harness" | "workflow";
+    type: "repository" | "task" | "run" | "review" | "pull_request" | "harness" | "workflow" | "runner";
     id?: string;
   };
   result: "allowed" | "denied" | "completed" | "failed";
@@ -87,6 +92,11 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "pull_request.refresh",
     "provider.configure",
     "workspace_provider.experimental_run",
+    "runner.view",
+    "runner.register",
+    "runner.enable",
+    "runner.disable",
+    "runner.use_remote",
   ],
   maintainer: [
     "repository.view",
@@ -109,12 +119,15 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "pull_request.open",
     "pull_request.refresh",
     "provider.configure",
+    "runner.view",
+    "runner.use_remote",
   ],
   reviewer: [
     "repository.view",
     "review.approve",
     "review.request_changes",
     "pull_request.refresh",
+    "runner.view",
   ],
   operator: [
     "repository.view",
@@ -125,8 +138,9 @@ const ROLE_PERMISSIONS: Record<RepositoryRole, PermissionKey[]> = {
     "task.run_codex",
     "task.cancel_run",
     "pull_request.refresh",
+    "runner.view",
   ],
-  viewer: ["repository.view"],
+  viewer: ["repository.view", "runner.view"],
 };
 
 export function roleLabel(role?: RepositoryRole | string): string {
@@ -183,6 +197,16 @@ export function disabledReason(
   }
   if (permission === "pull_request.open") {
     return "Only maintainers and owners can open pull requests.";
+  }
+  if (
+    permission === "runner.register" ||
+    permission === "runner.enable" ||
+    permission === "runner.disable"
+  ) {
+    return "Only owners can register or manage runners.";
+  }
+  if (permission === "runner.use_remote") {
+    return "Only maintainers and owners can use remote runners when repository policy allows it.";
   }
 
   return "You do not have permission for this action.";

@@ -11,9 +11,12 @@ defmodule SymphoniaService.Access.AuditLog do
     reviewBranch
     githubPrUrl
     reasonCode
+    runnerId
+    runnerMode
+    capabilitySummary
   )
 
-  @target_types ~w(repository task run review pull_request harness workflow)
+  @target_types ~w(repository task run review pull_request harness workflow runner)
 
   def path(registry_path) do
     Path.join([Path.dirname(registry_path), "audit", "events.jsonl"])

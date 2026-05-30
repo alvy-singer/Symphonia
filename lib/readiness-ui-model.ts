@@ -55,6 +55,7 @@ export function groupReadinessChecks(
     planning: [],
     automation: [],
     provider: [],
+    runner: [],
     validation: [],
     github: [],
     review: [],
@@ -73,6 +74,7 @@ export function readinessBlocksAutomation(readiness: RepositoryReadiness): boole
       check.status === "failed" &&
       (check.category === "workspace" ||
         check.category === "provider" ||
+        check.category === "runner" ||
         check.category === "github" ||
         check.id === "harness_online"),
   );

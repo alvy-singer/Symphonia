@@ -8,6 +8,7 @@ defmodule SymphoniaService.Harness.Daemon do
   alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore}
   alias SymphoniaService.Access.{Actor, AuditLog}
   alias SymphoniaService.CodingAssistant.{BranchManager, ProviderCatalog, RunEvents, RunStore}
+  alias SymphoniaService.Runners.Registry, as: RunnerRegistry
 
   alias SymphoniaService.Harness.{
     Automation,
@@ -631,6 +632,7 @@ defmodule SymphoniaService.Harness.Daemon do
       "activeRuns" => counts["activeRuns"],
       "staleRuns" => counts["staleRuns"],
       "retryScheduled" => counts["retryScheduled"],
+      "runners" => RunnerRegistry.capacity(state.registry_path),
       "providerReadiness" => ProviderCatalog.harness_status(mode: provider_mode),
       "lastHeartbeatAt" => state.last_heartbeat_at,
       "lastDispatch" => state.last_dispatch,
@@ -670,6 +672,7 @@ defmodule SymphoniaService.Harness.Daemon do
       "activeRuns" => counts["activeRuns"],
       "staleRuns" => counts["staleRuns"],
       "retryScheduled" => counts["retryScheduled"],
+      "runners" => RunnerRegistry.capacity(registry_path),
       "providerReadiness" => ProviderCatalog.readiness_status(mode: :check_only),
       "lastHeartbeatAt" => nil,
       "lastDispatch" => nil,

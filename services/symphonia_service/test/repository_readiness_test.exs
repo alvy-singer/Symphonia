@@ -202,7 +202,11 @@ defmodule SymphoniaService.RepositoryReadinessTest do
 
     readiness = RepositoryReadiness.get(repository, registry_path: registry_path)
 
-    assert readiness["state"] == "ready"
+    checks = Map.new(readiness["checks"], &{&1["id"], &1})
+
+    assert readiness["state"] == "warning"
+    assert checks["runner.local_service"]["status"] == "passed"
+    assert checks["runner.remote_execution"]["status"] == "warning"
   end
 
   defp stop_daemon do

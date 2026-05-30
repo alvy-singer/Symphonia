@@ -36,8 +36,7 @@ const WORKSPACE_GROUPS = [
 /**
  * Notion-like document tree, scoped to one repository.
  *
- * Planning artifacts are shown as private workspace sections. Repository rules
- * are a pinned root link.
+ * Planning artifacts and repository rules are shown as workspace files.
  */
 export function DocTree({ repoKey }: Props) {
   const pathname = usePathname();
@@ -45,7 +44,6 @@ export function DocTree({ repoKey }: Props) {
   const slug = repoKey.toLowerCase();
   const [specWorkspace, setSpecWorkspace] = useState<SpecWorkspacePayload | null>(null);
   const [specPending, setSpecPending] = useState<string | null>(null);
-  const [specError, setSpecError] = useState<string | null>(null);
 
   const loadSpecWorkspace = useCallback(async () => {
     const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace`, {
@@ -59,16 +57,14 @@ export function DocTree({ repoKey }: Props) {
       throw new Error(payload.error ?? "Could not load planning documents");
     }
     setSpecWorkspace(payload.specWorkspace);
-    setSpecError(null);
     return payload.specWorkspace;
   }, [repoKey]);
 
   useEffect(() => {
     let cancelled = false;
-    loadSpecWorkspace().catch((err: unknown) => {
+    loadSpecWorkspace().catch(() => {
       if (!cancelled) {
         setSpecWorkspace(null);
-        setSpecError(err instanceof Error ? err.message : "Could not load planning documents");
       }
     });
 
@@ -86,7 +82,6 @@ export function DocTree({ repoKey }: Props) {
 
   const initializeSpecWorkspace = async () => {
     setSpecPending("initialize");
-    setSpecError(null);
     try {
       const res = await fetch(
         `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/initialize`,
@@ -100,8 +95,8 @@ export function DocTree({ repoKey }: Props) {
         throw new Error(payload.error ?? "Could not set up planning documents");
       }
       setSpecWorkspace(payload.specWorkspace);
-    } catch (err) {
-      setSpecError(err instanceof Error ? err.message : "Could not set up planning documents");
+    } catch {
+      setSpecWorkspace(null);
     } finally {
       setSpecPending(null);
     }
@@ -110,7 +105,6 @@ export function DocTree({ repoKey }: Props) {
   const archiveSpecArtifact = async (artifact: SpecArtifactSummary) => {
     const pendingKey = specArtifactPendingKey("delete", artifact);
     setSpecPending(pendingKey);
-    setSpecError(null);
     try {
       const res = await fetch(
         `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/artifacts/${encodeURIComponent(
@@ -134,53 +128,53 @@ export function DocTree({ repoKey }: Props) {
       if (pathname === specArtifactHref(slug, artifact)) {
         router.push(`/r/${slug}`);
       }
-    } catch (err) {
-      setSpecError(err instanceof Error ? err.message : "Could not move document to trash");
+    } catch {
+      await loadSpecWorkspace().catch(() => undefined);
     } finally {
       setSpecPending(null);
     }
   };
 
+  const workspaceInitialized = specWorkspace?.state.initialized === true;
+  const repositoryRulesHref = `/r/${slug}/workflow`;
+
   return (
     <div className="space-y-3 text-[13px]">
-      {/* Repository rules are pinned, not a section. */}
-      <SidebarLink
-        href={`/r/${slug}/workflow`}
-        active={pathname === `/r/${slug}/workflow`}
-        icon={<GitBranch className="h-3.5 w-3.5" />}
-        label="Repository rules"
-      />
+      <div className="space-y-2">
+        <ul className="border-l pl-1.5">
+          <WorkspaceFileNode
+            href={repositoryRulesHref}
+            active={pathname === repositoryRulesHref}
+            icon={<GitBranch className="h-3.5 w-3.5 shrink-0" />}
+            title="Repository rules"
+          />
+        </ul>
 
-      {specError && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-300">
-          {specError}
-        </p>
-      )}
-
-      {specWorkspace?.state.initialized ? (
-        <div className="space-y-2">
-          {WORKSPACE_GROUPS.map((group) => {
-            const artifacts = group.sectionLabels.flatMap(
+        {WORKSPACE_GROUPS.map((group) => {
+          const artifacts = workspaceInitialized
+            ? group.sectionLabels.flatMap(
               (label) =>
                 specWorkspace.sections
                   .find((section) => section.label === label)
                   ?.artifacts.filter((artifact) => artifact.status !== "archived") ?? [],
-            );
+            )
+            : [];
 
-            return (
-              <SpecArtifactSection
-                key={group.label}
-                label={group.label}
-                artifacts={artifacts}
-                pending={specPending}
-                repoSlug={slug}
-                currentPath={pathname}
-                onArchive={archiveSpecArtifact}
-              />
-            );
-          })}
-        </div>
-      ) : (
+          return (
+            <SpecArtifactSection
+              key={group.label}
+              label={group.label}
+              artifacts={artifacts}
+              pending={specPending}
+              repoSlug={slug}
+              currentPath={pathname}
+              onArchive={archiveSpecArtifact}
+            />
+          );
+        })}
+      </div>
+
+      {!workspaceInitialized && (
         <div className="rounded-md border border-dashed px-2 py-2">
           <p className="text-[11px] text-muted-foreground">Set up planning documents for this repository.</p>
           <button
@@ -272,6 +266,32 @@ function SpecArtifactNode({
   const title = artifact.title || "Untitled";
 
   return (
+    <WorkspaceFileNode
+      href={specArtifactHref(repoSlug, artifact)}
+      active={active}
+      title={title}
+      pending={pending}
+      onArchive={() => void onArchive(artifact)}
+    />
+  );
+}
+
+function WorkspaceFileNode({
+  href,
+  active,
+  title,
+  pending,
+  icon,
+  onArchive,
+}: {
+  href: string;
+  active?: boolean;
+  title: string;
+  pending?: boolean;
+  icon?: React.ReactNode;
+  onArchive?: () => void;
+}) {
+  return (
     <li>
       <div
         className={cn(
@@ -279,26 +299,24 @@ function SpecArtifactNode({
           active && "bg-sidebar-accent text-sidebar-accent-foreground",
         )}
       >
-        <Link
-          href={specArtifactHref(repoSlug, artifact)}
-          className="min-w-0 flex-1 px-1.5 py-1"
-        >
+        <Link href={href} className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1">
+          {icon && <span className="text-muted-foreground">{icon}</span>}
           <span className="block truncate">
-            {artifact.title || (
-              <span className="italic text-muted-foreground/70">Untitled</span>
-            )}
+            {title || <span className="italic text-muted-foreground/70">Untitled</span>}
           </span>
         </Link>
-        <button
-          type="button"
-          onClick={() => void onArchive(artifact)}
-          disabled={pending}
-          aria-label={`Move ${title} to trash`}
-          title="Move to trash"
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground opacity-0 transition hover:bg-background/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        {onArchive && (
+          <button
+            type="button"
+            onClick={onArchive}
+            disabled={pending}
+            aria-label={`Move ${title} to trash`}
+            title="Move to trash"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground opacity-0 transition hover:bg-background/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </li>
   );
@@ -318,43 +336,4 @@ function specArtifactHref(
   return `/r/${slug}/workspace/${encodeURIComponent(artifact.type)}/${encodeURIComponent(
     artifact.id,
   )}`;
-}
-
-function SidebarLink({
-  href,
-  active,
-  icon,
-  label,
-  onClickAction,
-  muted,
-}: {
-  href: string;
-  active?: boolean;
-  icon: React.ReactNode;
-  label: string;
-  onClickAction?: () => void;
-  muted?: boolean;
-}) {
-  const className = cn(
-    "flex items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors",
-    active
-      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-      : muted
-        ? "text-muted-foreground/70 hover:bg-sidebar-accent hover:text-foreground"
-        : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
-  );
-  if (onClickAction) {
-    return (
-      <button onClick={onClickAction} className={cn(className, "w-full text-left")}>
-        {icon}
-        <span className="flex-1 truncate">{label}</span>
-      </button>
-    );
-  }
-  return (
-    <Link href={href} className={className}>
-      {icon}
-      <span className="flex-1 truncate">{label}</span>
-    </Link>
-  );
 }

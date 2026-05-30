@@ -7,7 +7,6 @@ import {
   ChevronDown,
   FileText,
   Hash,
-  Inbox,
   KanbanSquare,
   MessageCircle,
   Plus,
@@ -253,20 +252,20 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
 
         <nav className="space-y-0.5">
           <NavLink
-            to={`${base}/inbox`}
-            label="Inbox"
-            icon={<Inbox className="h-3.5 w-3.5" />}
-            active={isActive(`${base}/inbox`)}
-            onNavigate={handleNav}
-            title="Notifications across this repository"
-          />
-          <NavLink
             to={`${base}/tasks`}
             label="Tasks"
             icon={<KanbanSquare className="h-3.5 w-3.5" />}
             active={pathname === `${base}/tasks`}
             onNavigate={handleNav}
             title="Plan and track work on the board or list view"
+          />
+          <NavLink
+            to={base}
+            label="Clarise"
+            icon={<Sparkles className="h-3.5 w-3.5" />}
+            active={pathname === base}
+            onNavigate={handleNav}
+            title="Start with the Clarise repo chat"
           />
         </nav>
 
@@ -283,16 +282,6 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
               />
             )}
           </div>
-          <nav className="mb-1 space-y-0.5">
-            <NavLink
-              to={base}
-              label="Clarise"
-              icon={<Sparkles className="h-3.5 w-3.5" />}
-              active={pathname === base}
-              onNavigate={handleNav}
-              title="Start with the Clarise repo chat"
-            />
-          </nav>
           <DocTree repoKey={repoKey} />
         </div>
 

@@ -24,18 +24,33 @@ defmodule SymphoniaService.Access.Permission do
     "pull_request.open",
     "pull_request.refresh",
     "provider.configure",
-    "workspace_provider.experimental_run"
+    "workspace_provider.experimental_run",
+    "runner.view",
+    "runner.register",
+    "runner.enable",
+    "runner.disable",
+    "runner.use_remote"
   ]
 
   @role_permissions %{
     "owner" => MapSet.new(@permissions),
-    "maintainer" => MapSet.new(@permissions -- ["workspace_provider.experimental_run"]),
+    "maintainer" =>
+      MapSet.new(
+        @permissions --
+          [
+            "workspace_provider.experimental_run",
+            "runner.register",
+            "runner.enable",
+            "runner.disable"
+          ]
+      ),
     "reviewer" =>
       MapSet.new([
         "repository.view",
         "review.approve",
         "review.request_changes",
-        "pull_request.refresh"
+        "pull_request.refresh",
+        "runner.view"
       ]),
     "operator" =>
       MapSet.new([
@@ -46,9 +61,10 @@ defmodule SymphoniaService.Access.Permission do
         "harness.reconcile",
         "task.run_codex",
         "task.cancel_run",
-        "pull_request.refresh"
+        "pull_request.refresh",
+        "runner.view"
       ]),
-    "viewer" => MapSet.new(["repository.view"])
+    "viewer" => MapSet.new(["repository.view", "runner.view"])
   }
 
   @labels %{
@@ -72,7 +88,12 @@ defmodule SymphoniaService.Access.Permission do
     "pull_request.open" => "open pull requests",
     "pull_request.refresh" => "refresh pull request status",
     "provider.configure" => "configure providers",
-    "workspace_provider.experimental_run" => "run experimental sandbox workspaces"
+    "workspace_provider.experimental_run" => "run experimental sandbox workspaces",
+    "runner.view" => "view runners",
+    "runner.register" => "register runners",
+    "runner.enable" => "enable runners",
+    "runner.disable" => "disable runners",
+    "runner.use_remote" => "use remote runners"
   }
 
   @denials %{
@@ -94,7 +115,11 @@ defmodule SymphoniaService.Access.Permission do
     "automation.disable" =>
       "You do not have permission to disable automation for this repository.",
     "workspace_provider.experimental_run" =>
-      "You do not have permission to run experimental sandbox workspaces for this repository."
+      "You do not have permission to run experimental sandbox workspaces for this repository.",
+    "runner.register" => "You do not have permission to register runners for this repository.",
+    "runner.enable" => "You do not have permission to enable runners for this repository.",
+    "runner.disable" => "You do not have permission to disable runners for this repository.",
+    "runner.use_remote" => "You do not have permission to use remote runners for this repository."
   }
 
   def all, do: @permissions

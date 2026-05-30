@@ -58,6 +58,17 @@ const accessCompiled = ts.transpileModule(accessSource, {
 const accessCompiledPath = join(tempDir, "access-ui-model.cjs");
 await writeFile(accessCompiledPath, accessCompiled.outputText);
 
+const runnerSource = await readFile(new URL("../lib/runner-model.ts", import.meta.url), "utf8");
+const runnerCompiled = ts.transpileModule(runnerSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    importsNotUsedAsValues: ts.ImportsNotUsedAsValues.Remove,
+  },
+});
+const runnerCompiledPath = join(tempDir, "runner-model.cjs");
+await writeFile(runnerCompiledPath, runnerCompiled.outputText);
+
 const require = createRequire(import.meta.url);
 const {
   activeRunPollingTarget,
@@ -112,6 +123,14 @@ const {
   permissionSummary,
   roleLabel,
 } = require(accessCompiledPath);
+
+const {
+  canSelectRunnerForHarness,
+  runnerCapabilitySummary,
+  runnerCapacityLabel,
+  runnerStatusLabel,
+  runnerStatusTone,
+} = require(runnerCompiledPath);
 
 function task(attrs = {}) {
   return {
@@ -728,7 +747,7 @@ test("provider helpers label runnable and future providers", () => {
 });
 
 test("access helpers map V1 roles to permissions and disabled copy", () => {
-  const viewer = { role: "viewer", permissions: { "repository.view": true } };
+  const viewer = { role: "viewer", permissions: { "repository.view": true, "runner.view": true } };
   const reviewer = {
     role: "reviewer",
     permissions: {
@@ -754,9 +773,11 @@ test("access helpers map V1 roles to permissions and disabled copy", () => {
     "Read-only access to tasks, readiness, handoffs, runs, and activity.",
   );
   assert.equal(canAccess(viewer, "task.run_codex"), false);
+  assert.equal(canAccess(viewer, "runner.view"), true);
   assert.equal(canAccess(reviewer, "review.approve"), true);
   assert.equal(canAccess(reviewer, "pull_request.open"), false);
   assert.equal(canAccess(operator, "harness.pause"), true);
+  assert.equal(canAccess(operator, "runner.use_remote"), false);
   assert.equal(canAccess(operator, "review.approve"), false);
   assert.equal(disabledReason(viewer, "task.run_codex"), "You have read-only access.");
   assert.equal(
@@ -767,6 +788,56 @@ test("access helpers map V1 roles to permissions and disabled copy", () => {
     disabledReason(operator, "review.approve"),
     "Operators can manage runs and Harness controls, but cannot approve handoffs.",
   );
+  assert.equal(
+    disabledReason(operator, "runner.use_remote"),
+    "Only maintainers and owners can use remote runners when repository policy allows it.",
+  );
+});
+
+test("runner UI helpers map status, capacity, and capability summaries", () => {
+  const local = {
+    id: "local-service",
+    name: "Local service",
+    mode: "local_service",
+    status: "online",
+    capabilities: {
+      codexAppServer: true,
+      localGitWorktree: true,
+      experimentalSandbox: false,
+      validation: true,
+    },
+    limits: { maxConcurrentRuns: 1 },
+    currentRuns: 0,
+  };
+  const remote = {
+    ...local,
+    id: "runner_abc",
+    name: "runner-mac-mini",
+    mode: "remote_runner",
+    status: "online",
+    capabilities: {
+      codexAppServer: true,
+      localGitWorktree: false,
+      experimentalSandbox: true,
+      validation: true,
+    },
+  };
+
+  assert.equal(runnerStatusLabel(local), "Online");
+  assert.equal(runnerStatusTone(local), "ready");
+  assert.equal(runnerCapacityLabel(local), "0 / 1");
+  assert.equal(canSelectRunnerForHarness(local), true);
+
+  assert.equal(runnerStatusLabel(remote), "Online · Experimental");
+  assert.equal(runnerStatusTone(remote), "warning");
+  assert.equal(
+    runnerCapabilitySummary(remote),
+    "Codex ready · Experimental sandbox · Validation ready",
+  );
+  assert.equal(canSelectRunnerForHarness(remote), false);
+  assert.equal(runnerStatusTone({ ...remote, status: "stale" }), "warning");
+  assert.equal(runnerStatusTone({ ...remote, status: "offline" }), "blocked");
+  assert.equal(runnerStatusTone({ ...remote, status: "disabled" }), "neutral");
 });
 
 test("Next service proxy forwards only safe actor headers", async () => {

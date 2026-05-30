@@ -41,8 +41,11 @@ interface Props {
   onDiscard?: () => void;
   onPersist?: (patch: EditorPatch) => void | Promise<void>;
   onPersistError?: (error: unknown) => void;
+  onDraftChange?: (patch: EditorPatch) => void;
   /** Hide title editing where the title is fixed. */
   fixedTitle?: boolean;
+  /** Hide page icon/cover controls for fixed repository files without metadata. */
+  metadataControls?: boolean;
   /** Optional content rendered above the editor (e.g. cover/header). */
   className?: string;
   /** Slot rendered in the toolbar — used by the workflow editor for templates. */
@@ -88,7 +91,9 @@ export function MarkdownEditor({
   onDiscard,
   onPersist,
   onPersistError,
+  onDraftChange,
   fixedTitle,
+  metadataControls = true,
   className,
   rightToolbarSlot,
   afterSaveStatusSlot,
@@ -373,7 +378,7 @@ export function MarkdownEditor({
           <div className="h-6" aria-hidden />
         )}
         <div className="absolute right-3 top-3 flex items-center gap-1.5">
-          {cover && (
+          {metadataControls && cover && (
             <button
               onClick={() => {
                 setCover(undefined);
@@ -391,66 +396,68 @@ export function MarkdownEditor({
         <div className="mx-auto max-w-3xl px-4 sm:px-8 pb-16">
           {/* Affordances above title */}
           <div className={cn("flex items-center gap-1.5", cover ? "-mt-6" : "mt-3")}>
-            <div className="relative">
-              <button
-                onClick={() => setIconOpen((v) => !v)}
-                aria-label={icon ? "Change page icon" : "Add page icon"}
-                className={cn(
-                  "grid place-items-center rounded-md border bg-background text-2xl transition",
-                  icon ? "h-12 w-12" : "h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {icon ?? (
-                  <span className="inline-flex items-center gap-1">
-                    <Smile className="h-3.5 w-3.5" /> Add icon
-                  </span>
-                )}
-              </button>
-              {iconOpen && (
-                <div
-                  role="dialog"
-                  aria-label="Pick an icon"
-                  className="absolute z-20 mt-1 w-60 rounded-lg border bg-popover p-2 shadow-xl"
+            {metadataControls && (
+              <div className="relative">
+                <button
+                  onClick={() => setIconOpen((v) => !v)}
+                  aria-label={icon ? "Change page icon" : "Add page icon"}
+                  className={cn(
+                    "grid place-items-center rounded-md border bg-background text-2xl transition",
+                    icon ? "h-12 w-12" : "h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground",
+                  )}
                 >
-                  <div className="grid grid-cols-6 gap-1">
-                    {COMMON_ICONS.map((ic) => (
+                  {icon ?? (
+                    <span className="inline-flex items-center gap-1">
+                      <Smile className="h-3.5 w-3.5" /> Add icon
+                    </span>
+                  )}
+                </button>
+                {iconOpen && (
+                  <div
+                    role="dialog"
+                    aria-label="Pick an icon"
+                    className="absolute z-20 mt-1 w-60 rounded-lg border bg-popover p-2 shadow-xl"
+                  >
+                    <div className="grid grid-cols-6 gap-1">
+                      {COMMON_ICONS.map((ic) => (
+                        <button
+                          key={ic}
+                          onClick={() => {
+                            setIcon(ic);
+                            setIconOpen(false);
+                            setDirty(true);
+                          }}
+                          className="grid h-8 place-items-center rounded hover:bg-accent text-lg"
+                          aria-label={`Use icon ${ic}`}
+                        >
+                          {ic}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex items-center justify-between border-t pt-2">
                       <button
-                        key={ic}
                         onClick={() => {
-                          setIcon(ic);
+                          setIcon(undefined);
                           setIconOpen(false);
                           setDirty(true);
                         }}
-                        className="grid h-8 place-items-center rounded hover:bg-accent text-lg"
-                        aria-label={`Use icon ${ic}`}
+                        className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
                       >
-                        {ic}
+                        <Trash2 className="h-3 w-3" /> Remove
                       </button>
-                    ))}
+                      <button
+                        onClick={() => setIconOpen(false)}
+                        className="text-[11px] text-muted-foreground hover:text-foreground"
+                      >
+                        Close
+                      </button>
+                    </div>
                   </div>
-                  <div className="mt-2 flex items-center justify-between border-t pt-2">
-                    <button
-                      onClick={() => {
-                        setIcon(undefined);
-                        setIconOpen(false);
-                        setDirty(true);
-                      }}
-                      className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-                    >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </button>
-                    <button
-                      onClick={() => setIconOpen(false)}
-                      className="text-[11px] text-muted-foreground hover:text-foreground"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
-            {!cover && (
+            {metadataControls && !cover && (
               <div className="relative">
                 <button
                   onClick={() => setCoverOpen((v) => !v)}
@@ -611,6 +618,7 @@ export function MarkdownEditor({
                 const next = e.target.value;
                 setBody(next);
                 setDirty(true);
+                onDraftChange?.({ body: next });
                 updateSlashState(next, e.currentTarget.selectionStart);
               }}
               onKeyDown={onBodyKeyDown}

@@ -55,4 +55,12 @@ defmodule SymphoniaService.WorkspaceTest do
       Workspace.create_workflow_from_template(repository, "review-first")
     end
   end
+
+  test "updates workflow as a repository file", %{repository: repository} do
+    workflow = Workspace.update_workflow(repository, "# WORKFLOW.md\n\non_task_started:\n")
+
+    assert workflow["exists"]
+    assert workflow["body"] =~ "on_task_started:"
+    assert File.read!(Path.join(repository["path"], "WORKFLOW.md")) == workflow["body"]
+  end
 end

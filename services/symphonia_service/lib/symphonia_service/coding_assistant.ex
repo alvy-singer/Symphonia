@@ -16,6 +16,8 @@ defmodule SymphoniaService.CodingAssistant do
     RunSupervisor
   }
 
+  alias SymphoniaService.Access.Actor
+  alias SymphoniaService.Runners.{LocalService, SelectionPolicy}
   alias SymphoniaService.TaskStore
 
   @continuation_max_attempts 2
@@ -32,6 +34,7 @@ defmodule SymphoniaService.CodingAssistant do
         "repository" => repository["key"],
         "task" => task_key,
         "kind" => "assignment",
+        "runner" => Map.get(params, "runner", LocalService.runner_metadata()),
         "codex_thread_id" => previous_codex_thread_id(task)
       })
 
@@ -57,6 +60,7 @@ defmodule SymphoniaService.CodingAssistant do
     ensure_assignable!(task)
 
     provider = ProviderCatalog.harness_runnable_provider()
+    {:ok, runner} = SelectionPolicy.select_for_run(registry_path, repository, Actor.harness())
 
     run =
       RunStore.create(%{
@@ -64,6 +68,7 @@ defmodule SymphoniaService.CodingAssistant do
         "repository" => repository["key"],
         "task" => task_key,
         "kind" => "daemon_assignment",
+        "runner" => runner,
         "eligibility_reason" => Map.get(params, "eligibility_reason"),
         "attempt" => Map.get(params, "attempt", 0),
         "max_attempts" =>
@@ -114,6 +119,7 @@ defmodule SymphoniaService.CodingAssistant do
         "repository" => repository["key"],
         "task" => task_key,
         "kind" => "review_continuation",
+        "runner" => Map.get(params, "runner", LocalService.runner_metadata()),
         "input" => assistant_input,
         "review_note_id" => review_note["id"],
         "attempt" => 1,
@@ -275,6 +281,7 @@ defmodule SymphoniaService.CodingAssistant do
       "display_step" => RunEvents.display_step(run),
       "display_message" => RunEvents.display_message(run),
       "eligibility_reason" => run["eligibility_reason"],
+      "runner" => run["runner"],
       "workspace_provider" => run["workspace_provider"],
       "review_branch" => run["review_branch"],
       "curated_summary_path" => run["curated_summary_path"],

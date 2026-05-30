@@ -67,6 +67,11 @@ export interface CodingAssistantRun {
   message?: string;
   displayStep?: string;
   displayMessage?: string;
+  runner?: {
+    id: string;
+    mode: "local_service" | "remote_runner" | string;
+    name: string;
+  };
   workspaceProvider?: "local_git_worktree" | "experimental_sandbox" | string;
   workspacePath?: string;
   codexThreadId?: string;
