@@ -47,6 +47,7 @@ defmodule SymphoniaService.Sandbox.Session do
   end
 
   def label("fake_sandbox"), do: "Fake sandbox"
+  def label("opensandbox"), do: "OpenSandbox"
   def label(value) when is_binary(value) and value != "", do: value
   def label(_value), do: "Sandbox provider"
 

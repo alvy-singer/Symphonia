@@ -498,7 +498,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
 
   defp sandbox_checks(repository) do
     policy_enabled? = SandboxPolicy.allowed?(repository)
-    readiness = SandboxRegistry.readiness(repository)
+    readiness = SandboxRegistry.readiness(repository, registry_path)
     provider_configured? = readiness["configured"] == true
     provider = SandboxRegistry.provider_id(repository)
     provider_allowed? = RepositoryPolicy.sandbox_provider_allowed?(repository, provider)

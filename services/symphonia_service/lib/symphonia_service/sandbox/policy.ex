@@ -32,13 +32,15 @@ defmodule SymphoniaService.Sandbox.Policy do
 
   def provider(repository), do: Registry.provider_id(repository)
 
-  def public(repository) when is_map(repository) do
+  def public(repository, registry_path \\ nil) when is_map(repository) do
     provider = provider(repository)
+    readiness = Registry.readiness(repository, registry_path)
 
     %{
       "sandboxExecutionAllowed" => allowed?(repository),
       "sandboxProvider" => provider,
-      "sandboxProviderLabel" => Registry.provider_label(repository)
+      "sandboxProviderLabel" => Registry.provider_label(repository),
+      "sandboxProviderReadiness" => readiness
     }
   end
 
@@ -48,7 +50,7 @@ defmodule SymphoniaService.Sandbox.Policy do
 
     provider =
       attrs["sandboxProvider"] || attrs["sandbox_provider"] ||
-        if(allowed?, do: Registry.fake_provider(), else: nil)
+        if(allowed?, do: Registry.default_provider(), else: nil)
 
     RepositoryRegistry.update(registry_path, repo_key, fn repository ->
       repository
@@ -63,6 +65,7 @@ defmodule SymphoniaService.Sandbox.Policy do
          :ok <- require_repository_policy(repository),
          :ok <- require_provider(repository),
          :ok <- require_provider_allowed(repository),
+         :ok <- require_provider_ready(repository, registry_path),
          :ok <- require_task_eligible(task),
          :ok <- require_harness_not_paused(registry_path) do
       :ok
@@ -145,6 +148,23 @@ defmodule SymphoniaService.Sandbox.Policy do
     end
   end
 
+  defp require_provider_ready(repository, registry_path) do
+    readiness = Registry.readiness(repository, registry_path)
+
+    if readiness["ready"] == true do
+      :ok
+    else
+      reason = readiness["reason"] || "sandbox_provider_not_configured"
+
+      {:error,
+       {409,
+        %{
+          "error" => "Sandbox provider is not ready.",
+          "reasonCode" => to_string(reason)
+        }}}
+    end
+  end
+
   defp require_task_eligible(%{"status" => status})
        when status in ["todo", "paused"],
        do: :ok
@@ -167,7 +187,7 @@ defmodule SymphoniaService.Sandbox.Policy do
   end
 
   defp normalize_provider(_provider, false), do: nil
-  defp normalize_provider(provider, true) when provider in [nil, ""], do: Registry.fake_provider()
+  defp normalize_provider(provider, true) when provider in [nil, ""], do: Registry.default_provider()
   defp normalize_provider(provider, true) when is_binary(provider), do: provider
-  defp normalize_provider(_provider, true), do: Registry.fake_provider()
+  defp normalize_provider(_provider, true), do: Registry.default_provider()
 end

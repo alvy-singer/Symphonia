@@ -71,7 +71,6 @@ import {
 import {
   type FC,
   type PropsWithChildren,
-  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -854,16 +853,6 @@ function ClariseMessage({ message }: { message: MessageState }) {
             />
           )}
 
-          {failures.length > 0 && (
-            <div className="grid gap-2">
-              {failures.map((failure) => (
-                <ClariseSystemNotice key={`${failure.artifactKind}:${failure.title}`} tone="warning">
-                  {failure.title}: {failure.error}
-                </ClariseSystemNotice>
-              ))}
-            </div>
-          )}
-
           {!isUser && !isSystem && (
             <ClariseFeedbackBar messageId={message.id} text={visibleText} />
           )}
@@ -1211,27 +1200,6 @@ function ClariseSystemMessage({ children }: { children: string }) {
     <div className="flex items-start gap-2 text-[13px] text-muted-foreground">
       <Info className="mt-1 h-3.5 w-3.5 shrink-0" />
       <p className="whitespace-pre-wrap break-words">{children}</p>
-    </div>
-  );
-}
-
-function ClariseSystemNotice({
-  children,
-  tone = "neutral",
-}: {
-  children: ReactNode;
-  tone?: "neutral" | "warning";
-}) {
-  return (
-    <div
-      className={cn(
-        "border-l px-3 py-2 text-[12px]",
-        tone === "warning"
-          ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-          : "border-border bg-background/55 text-muted-foreground",
-      )}
-    >
-      {children}
     </div>
   );
 }
