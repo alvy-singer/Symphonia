@@ -222,23 +222,36 @@ const SLASH_COMMANDS = [
   },
 ];
 
-const PROMPT_SUGGESTIONS = [
+const PROMPT_SUGGESTIONS: {
+  label: string;
+  hint: string;
+  prompt: string;
+  icon: typeof FileText;
+}[] = [
   {
     label: "Map this repo",
+    hint: "Build a private codebase map",
     prompt: "/codebase Create a private codebase map for this repository.",
+    icon: FileText,
   },
   {
     label: "Plan a feature",
+    hint: "Milestone, requirements, plan & first task",
     prompt:
       "/new-project Create a private milestone, requirements, plan, and first task brief.",
+    icon: Milestone,
   },
   {
     label: "Verify work",
+    hint: "Prepare a verification task brief",
     prompt: "/verify-work Prepare a verification task brief for the current changes.",
+    icon: CheckCircle2,
   },
   {
     label: "Record decision",
+    hint: "Capture options & a recommendation",
     prompt: "/decision Capture a private decision with options and recommendation.",
+    icon: Landmark,
   },
 ];
 
@@ -264,22 +277,7 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
   const [modelProfile, setModelProfile] = useStoredClariseModelProfile(profileStorageKey);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const initialMessages = useMemo<ClariseUIMessage[]>(
-    () => [
-      {
-        id: "welcome",
-        role: "assistant",
-        parts: [
-          {
-            type: "text",
-            text:
-              "Start by telling Clarise what you want to build. Clarise will create the private workspace structure for this repository.",
-          },
-        ],
-      },
-    ],
-    [],
-  );
+  const initialMessages = useMemo<ClariseUIMessage[]>(() => [], []);
 
   const runtime = usePersistentClariseRuntime({
     repoKey,
@@ -304,68 +302,69 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
         <ClariseThreadSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(true)}
-                aria-label="Open threads"
-                className="grid h-9 w-9 place-items-center rounded-[8px] border bg-card text-muted-foreground transition hover:bg-accent hover:text-foreground md:hidden"
-              >
-                <Menu className="h-4 w-4" />
-              </button>
+          <header className="flex items-center gap-3 border-b bg-background/80 px-4 py-2.5 backdrop-blur sm:px-6">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open threads"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-[8px] border bg-card text-muted-foreground transition hover:bg-accent hover:text-foreground md:hidden"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
 
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-brand-accent-soft text-brand-accent-text">
-                    <Sparkles className="h-4 w-4" />
-                  </span>
-                </div>
-                <h1 className="mt-2 break-words text-[30px] font-bold leading-none sm:text-[42px]">
-                  Clarise
-                </h1>
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-accent-soft text-brand-accent-text">
+                <Sparkles className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 leading-tight">
+                <p className="truncate text-[15px] font-semibold text-foreground">Clarise</p>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">{repoKey}</p>
               </div>
+            </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="flex h-8 items-center gap-1.5 rounded-[6px] border bg-card px-2 text-[11px] text-muted-foreground">
-                  Provider
-                  <select
-                    value={provider}
-                    onChange={(event) => setProvider(event.target.value as ClariseProviderId)}
-                    className="max-w-28 bg-transparent text-[11px] font-medium text-foreground outline-none"
-                    aria-label="Clarise provider"
-                  >
-                    {PROVIDERS.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+            <div className="flex shrink-0 items-center gap-2">
+              <label className="flex h-8 items-center gap-1.5 rounded-full border bg-card px-2.5 text-[11px] text-muted-foreground">
+                <span className="hidden sm:inline">Provider</span>
+                <select
+                  value={provider}
+                  onChange={(event) => setProvider(event.target.value as ClariseProviderId)}
+                  className="max-w-28 bg-transparent text-[11px] font-medium text-foreground outline-none"
+                  aria-label="Clarise provider"
+                >
+                  {PROVIDERS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                <label className="flex h-8 items-center gap-1.5 rounded-[6px] border bg-card px-2 text-[11px] text-muted-foreground">
-                  Profile
-                  <select
-                    value={modelProfile}
-                    onChange={(event) =>
-                      setModelProfile(event.target.value as ClariseModelProfile)
-                    }
-                    className="max-w-24 bg-transparent text-[11px] font-medium text-foreground outline-none"
-                    aria-label="Clarise model profile"
-                  >
-                    {MODEL_PROFILES.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+              <label className="flex h-8 items-center gap-1.5 rounded-full border bg-card px-2.5 text-[11px] text-muted-foreground">
+                <span className="hidden sm:inline">Profile</span>
+                <select
+                  value={modelProfile}
+                  onChange={(event) =>
+                    setModelProfile(event.target.value as ClariseModelProfile)
+                  }
+                  className="max-w-24 bg-transparent text-[11px] font-medium text-foreground outline-none"
+                  aria-label="Clarise model profile"
+                >
+                  {MODEL_PROFILES.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </header>
 
           <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
             <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+              <ThreadPrimitive.Empty>
+                <ClariseWelcome repoKey={repoKey} />
+              </ThreadPrimitive.Empty>
+
               <div className="mx-auto flex max-w-4xl flex-col gap-4">
                 <ThreadPrimitive.Messages>
                   {({ message }) => <ClariseMessage key={message.id} message={message} />}
@@ -866,7 +865,6 @@ function ClariseComposer() {
   const composer = useComposerRuntime();
   const text = useComposer((state) => state.text);
   const isSlashQuery = text.startsWith("/") && !/\s/.test(text);
-  const showSuggestions = text.trim().length === 0;
   const query = isSlashQuery ? text.slice(1).toLowerCase() : "";
   const activeCommand = text.startsWith("/")
     ? SLASH_COMMANDS.find(
@@ -925,14 +923,6 @@ function ClariseComposer() {
           </div>
         )}
 
-        {showSuggestions && !showMenu && (
-          <PromptSuggestions
-            onSelect={(prompt) => {
-              composer.setText(prompt);
-            }}
-          />
-        )}
-
         <ComposerPrimitive.AttachmentDropzone className="rounded-[12px] border border-transparent transition data-[dragging=true]:border-brand-accent/70 data-[dragging=true]:bg-brand-accent-soft">
           <ComposerPrimitive.Root className="flex flex-col gap-3 rounded-[10px] border bg-card p-3 shadow-[var(--elevation-card)]">
             <ComposerPrimitive.Attachments>
@@ -970,22 +960,56 @@ function ClariseComposer() {
   );
 }
 
-function PromptSuggestions({ onSelect }: { onSelect: (prompt: string) => void }) {
+function ClariseWelcome({ repoKey }: { repoKey: string }) {
   return (
-    <div className="mb-2 flex flex-wrap gap-2">
-      {PROMPT_SUGGESTIONS.map((suggestion) => (
-        <button
-          key={suggestion.label}
-          type="button"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            onSelect(suggestion.prompt);
-          }}
-          className="rounded-[7px] border bg-card px-3 py-1.5 text-[12px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
-        >
-          {suggestion.label}
-        </button>
-      ))}
+    <div className="mx-auto flex min-h-[52vh] w-full max-w-2xl flex-col items-center justify-center px-1 text-center">
+      <span className="mb-5 grid h-14 w-14 place-items-center rounded-2xl bg-brand-accent-soft text-brand-accent-text shadow-[var(--elevation-card)]">
+        <Sparkles className="h-7 w-7" />
+      </span>
+      <h2 className="text-balance text-[28px] font-semibold leading-tight text-foreground sm:text-[34px]">
+        What do you want to build?
+      </h2>
+      <p className="mt-2 max-w-md text-pretty text-[14px] leading-6 text-muted-foreground">
+        Tell Clarise what you have in mind. It will create the private workspace
+        structure for{" "}
+        <span className="font-mono text-foreground">{repoKey}</span> — maps, milestones,
+        plans, decisions, and task briefs.
+      </p>
+
+      <div className="mt-7 grid w-full gap-2.5 sm:grid-cols-2">
+        {PROMPT_SUGGESTIONS.map((suggestion) => {
+          const Icon = suggestion.icon;
+          return (
+            <ThreadPrimitive.Suggestion
+              key={suggestion.label}
+              prompt={suggestion.prompt}
+              send
+              className="group flex items-center gap-3 rounded-[12px] border bg-card p-3 text-left shadow-[var(--elevation-card)] transition hover:bg-accent hover:shadow-[var(--elevation-card-hover)]"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[9px] bg-brand-accent-soft text-brand-accent-text">
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium text-foreground">
+                  {suggestion.label}
+                </span>
+                <span className="block truncate text-[12px] text-muted-foreground">
+                  {suggestion.hint}
+                </span>
+              </span>
+              <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
+            </ThreadPrimitive.Suggestion>
+          );
+        })}
+      </div>
+
+      <p className="mt-5 text-[12px] text-muted-foreground/70">
+        Or type{" "}
+        <kbd className="rounded-[5px] border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+          /
+        </kbd>{" "}
+        for artifact commands.
+      </p>
     </div>
   );
 }
