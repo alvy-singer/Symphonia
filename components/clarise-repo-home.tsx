@@ -58,6 +58,8 @@ import {
   Menu,
   MessageSquareText,
   Milestone,
+  PanelLeft,
+  PanelLeftClose,
   Paperclip,
   Plus,
   Send,
@@ -276,6 +278,13 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
   const [provider, setProvider] = useStoredClariseProvider(providerStorageKey);
   const [modelProfile, setModelProfile] = useStoredClariseModelProfile(profileStorageKey);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const toggleSidebar = () => {
+    // mobile uses the drawer (sidebarOpen); desktop uses collapse
+    setSidebarOpen((open) => !open);
+    setSidebarCollapsed((collapsed) => !collapsed);
+  };
 
   const initialMessages = useMemo<ClariseUIMessage[]>(() => [], []);
 
@@ -299,17 +308,29 @@ export function ClariseRepoHome({ repoKey }: { repoKey: string }) {
           onClick={() => setSidebarOpen(false)}
         />
 
-        <ClariseThreadSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <ClariseThreadSidebar
+          open={sidebarOpen}
+          collapsed={sidebarCollapsed}
+          onClose={() => setSidebarOpen(false)}
+        />
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex items-center gap-3 border-b bg-background/80 px-4 py-2.5 backdrop-blur sm:px-6">
             <button
               type="button"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open threads"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-[8px] border bg-card text-muted-foreground transition hover:bg-accent hover:text-foreground md:hidden"
+              onClick={toggleSidebar}
+              aria-label={
+                sidebarOpen || !sidebarCollapsed ? "Close sidebar" : "Open sidebar"
+              }
+              aria-expanded={sidebarOpen || !sidebarCollapsed}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-[8px] border bg-card text-muted-foreground transition hover:bg-accent hover:text-foreground"
             >
-              <Menu className="h-4 w-4" />
+              <PanelLeft className="h-4 w-4 md:hidden" />
+              {sidebarCollapsed ? (
+                <PanelLeft className="hidden h-4 w-4 md:block" />
+              ) : (
+                <PanelLeftClose className="hidden h-4 w-4 md:block" />
+              )}
             </button>
 
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -678,15 +699,24 @@ function createClariseThreadListAdapter(prefix: string): RemoteThreadListAdapter
   };
 }
 
-function ClariseThreadSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+function ClariseThreadSidebar({
+  open,
+  collapsed,
+  onClose,
+}: {
+  open: boolean;
+  collapsed: boolean;
+  onClose: () => void;
+}) {
   const threadCount = useAuiState((state) => state.threads.threadIds.length);
   const isLoading = useAuiState((state) => state.threads.isLoading);
 
   return (
     <aside
       className={cn(
-        "fixed inset-y-0 left-0 z-40 flex w-[19rem] max-w-[86vw] flex-col border-r bg-sidebar text-sidebar-foreground transition-transform md:static md:z-auto md:max-w-none md:translate-x-0",
+        "fixed inset-y-0 left-0 z-40 flex w-[19rem] max-w-[86vw] flex-col border-r bg-sidebar text-sidebar-foreground transition-transform md:z-auto md:max-w-none",
         open ? "translate-x-0" : "-translate-x-full",
+        collapsed ? "md:hidden" : "md:static md:translate-x-0",
       )}
     >
       <ThreadListPrimitive.Root className="min-h-0 flex-1 overflow-y-auto p-2">
