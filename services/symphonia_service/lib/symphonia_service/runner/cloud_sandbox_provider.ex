@@ -35,10 +35,17 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
       run = mark(registry_path, repository, task, run, "Creating sandbox")
       audit(registry_path, repository, actor, "sandbox.create_started", assignment, "completed")
 
-      case provider.create(Map.put(params, "assignment", assignment)) do
+      create_opts =
+        params
+        |> Map.put("assignment", assignment)
+        |> Map.put("registry_path", registry_path)
+        |> Map.put("repository", repository)
+
+      case provider.create(create_opts) do
         {:ok, session} ->
           audit(registry_path, repository, actor, "sandbox.create_completed", assignment, "completed")
           run = mark(registry_path, repository, task, run, "Preparing sandbox workspace")
+          audit(registry_path, repository, actor, "sandbox.prepare_started", assignment, "completed")
 
           with {:ok, claimed} <- claim_assignment(registry_path, assignment),
                {:ok, context} <-
@@ -90,6 +97,7 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
          context
        ) do
     run = mark(registry_path, repository, task, run, "Running Codex in sandbox")
+    audit(registry_path, repository, actor, "sandbox.run_started", claimed, "completed")
 
     with {:ok, running} <- mark_assignment_running(registry_path, claimed),
          {:ok, result} <-

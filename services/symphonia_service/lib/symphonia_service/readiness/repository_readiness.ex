@@ -32,7 +32,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
       |> Kernel.++(automation_checks(repository, registry_path))
       |> Kernel.++(provider_checks())
       |> Kernel.++(runner_checks(repository, registry_path))
-      |> Kernel.++(sandbox_checks(repository))
+      |> Kernel.++(sandbox_checks(repository, registry_path))
       |> Kernel.++(secret_checks(repository, registry_path))
       |> Kernel.++(validation_checks(repository))
       |> Kernel.++(github_checks(repository))
@@ -496,7 +496,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
     ]
   end
 
-  defp sandbox_checks(repository) do
+  defp sandbox_checks(repository, registry_path) do
     policy_enabled? = SandboxPolicy.allowed?(repository)
     readiness = SandboxRegistry.readiness(repository, registry_path)
     provider_configured? = readiness["configured"] == true
