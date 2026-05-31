@@ -10,7 +10,15 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
   alias SymphoniaService.Access.{Actor, AuditLog}
   alias SymphoniaService.CodingAssistant.RunStore
   alias SymphoniaService.Runners.{AssignmentStore, Assignments}
-  alias SymphoniaService.Sandbox.{OpenSandboxOperations, OpenSandboxProvider, Policy, Registry, Session}
+
+  alias SymphoniaService.Sandbox.{
+    OpenSandboxOperations,
+    OpenSandboxProvider,
+    Policy,
+    Registry,
+    Session
+  }
+
   alias SymphoniaService.TaskStore
 
   def runner_metadata(repository), do: Policy.runner_metadata(repository)
@@ -23,14 +31,32 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
 
   def execute(registry_path, repository, task, run, assignment, actor, params \\ %{}) do
     with {:ok, provider} <- Registry.resolve(repository) do
-      execute_with_provider(registry_path, repository, task, run, assignment, actor, params, provider)
+      execute_with_provider(
+        registry_path,
+        repository,
+        task,
+        run,
+        assignment,
+        actor,
+        params,
+        provider
+      )
     else
       {:error, reason} ->
         fail_assignment(registry_path, repository, task, assignment, reason, :ok)
     end
   end
 
-  defp execute_with_provider(registry_path, repository, task, run, assignment, actor, params, provider) do
+  defp execute_with_provider(
+         registry_path,
+         repository,
+         task,
+         run,
+         assignment,
+         actor,
+         params,
+         provider
+       ) do
     try do
       run = mark(registry_path, repository, task, run, "Creating sandbox")
       audit(registry_path, repository, actor, "sandbox.create_started", assignment, "completed")
@@ -43,9 +69,25 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
 
       case provider.create(create_opts) do
         {:ok, session} ->
-          audit(registry_path, repository, actor, "sandbox.create_completed", assignment, "completed")
+          audit(
+            registry_path,
+            repository,
+            actor,
+            "sandbox.create_completed",
+            assignment,
+            "completed"
+          )
+
           run = mark(registry_path, repository, task, run, "Preparing sandbox workspace")
-          audit(registry_path, repository, actor, "sandbox.prepare_started", assignment, "completed")
+
+          audit(
+            registry_path,
+            repository,
+            actor,
+            "sandbox.prepare_started",
+            assignment,
+            "completed"
+          )
 
           with {:ok, claimed} <- claim_assignment(registry_path, assignment),
                {:ok, context} <-
@@ -72,7 +114,9 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
             )
           else
             {:error, reason} ->
-              release_result = release(provider, session, registry_path, repository, actor, assignment)
+              release_result =
+                release(provider, session, registry_path, repository, actor, assignment)
+
               fail_assignment(registry_path, repository, task, assignment, reason, release_result)
           end
 
@@ -81,7 +125,14 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
       end
     rescue
       error ->
-        fail_assignment(registry_path, repository, task, assignment, Exception.message(error), :ok)
+        fail_assignment(
+          registry_path,
+          repository,
+          task,
+          assignment,
+          Exception.message(error),
+          :ok
+        )
     end
   end
 
@@ -96,12 +147,16 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
          provider,
          context
        ) do
-    run = mark(registry_path, repository, task, run, "Running Codex in sandbox")
+    run = mark(registry_path, repository, task, run, running_step(claimed))
     audit(registry_path, repository, actor, "sandbox.run_started", claimed, "completed")
 
     with {:ok, running} <- mark_assignment_running(registry_path, claimed),
          {:ok, result} <-
-           provider.run(Session.mark(context, "running"), context, Map.put(running, "params", params)) do
+           provider.run(
+             Session.mark(context, "running"),
+             context,
+             Map.put(running, "params", params)
+           ) do
       mark(registry_path, repository, task, run, "Receiving sandbox changes")
 
       case Assignments.submit_sandbox_result(registry_path, running["id"], result, actor) do
@@ -115,6 +170,8 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
             "completed",
             changedFileCount: length(List.wrap(completed["changed_files"]))
           )
+
+          audit_provider_result(registry_path, repository, actor, completed)
 
           mark_latest(repository, task, completed, "Releasing sandbox")
           release_result = release(provider, context, registry_path, repository, actor, completed)
@@ -151,11 +208,21 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
     case provider.release(session) do
       :ok ->
         record_opensandbox_cleanup(provider, registry_path, repository, :ok)
-        audit(registry_path, repository, actor, "sandbox.release_completed", assignment, "completed")
+
+        audit(
+          registry_path,
+          repository,
+          actor,
+          "sandbox.release_completed",
+          assignment,
+          "completed"
+        )
+
         :ok
 
       {:error, reason} ->
         record_opensandbox_cleanup(provider, registry_path, repository, {:error, reason})
+
         audit(registry_path, repository, actor, "sandbox.release_failed", assignment, "failed",
           reasonCode: "sandbox_release_failed"
         )
@@ -194,7 +261,14 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
     failure_class = safe_reason(reason)
     public_message = "Sandbox execution could not produce a reviewable patch."
 
-    Assignments.fail_sandbox_assignment(registry_path, assignment["id"], failure_class, public_message)
+    Assignments.fail_sandbox_assignment(
+      registry_path,
+      assignment["id"],
+      failure_class,
+      public_message
+    )
+
+    audit_provider_failed(registry_path, repository, Actor.default(), assignment, failure_class)
 
     case release_result do
       {:error, _release_reason} ->
@@ -211,6 +285,44 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
 
     :ok
   end
+
+  defp running_step(%{"provider" => "gemini_cli"}), do: "Running Gemini in sandbox"
+  defp running_step(_assignment), do: "Running Codex in sandbox"
+
+  defp audit_provider_result(
+         registry_path,
+         repository,
+         actor,
+         %{"provider" => "gemini_cli"} = assignment
+       ) do
+    audit(
+      registry_path,
+      repository,
+      actor,
+      "provider.gemini_cli_result_received",
+      assignment,
+      "completed", changedFileCount: length(List.wrap(assignment["changed_files"])))
+  end
+
+  defp audit_provider_result(_registry_path, _repository, _actor, _assignment), do: :ok
+
+  defp audit_provider_failed(
+         registry_path,
+         repository,
+         actor,
+         %{"provider" => "gemini_cli"} = assignment,
+         reason
+       ) do
+    audit(
+      registry_path,
+      repository,
+      actor,
+      "provider.gemini_cli_run_failed",
+      assignment,
+      "failed", reasonCode: reason)
+  end
+
+  defp audit_provider_failed(_registry_path, _repository, _actor, _assignment, _reason), do: :ok
 
   defp mark(_registry_path, repository, task, run, step) do
     run = RunStore.mark_step(run, step)
@@ -240,6 +352,7 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
             "id" => run["id"],
             "kind" => run["kind"],
             "state" => run["state"],
+            "provider" => run["provider"],
             "current_step" => run["current_step"],
             "message" => SymphoniaService.CodingAssistant.RunEvents.public_message(run),
             "display_step" => SymphoniaService.CodingAssistant.RunEvents.display_step(run),

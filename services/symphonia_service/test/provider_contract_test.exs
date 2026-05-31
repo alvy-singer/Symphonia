@@ -8,6 +8,8 @@ defmodule SymphoniaService.ProviderContractTest do
     RunStore
   }
 
+  alias SymphoniaService.Sandbox.ProviderRunnerScript
+
   test "AppServerProvider declares the full review-first capability contract" do
     capabilities = AppServerProvider.capabilities()
 
@@ -77,6 +79,15 @@ defmodule SymphoniaService.ProviderContractTest do
       assert failure_class == expected
       assert failure_class in FailureClass.all()
     end
+  end
+
+  test "Gemini sandbox runner uses the controlled headless JSON command path" do
+    script = ProviderRunnerScript.content()
+
+    assert script =~ "\"gemini\", \"--prompt\", prompt, \"--output-format\", \"json\""
+    assert script =~ "\"publicSummary\": \"Gemini CLI produced a reviewable patch.\""
+    assert script =~ "git_diff"
+    refute script =~ "GEMINI_API_KEY="
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

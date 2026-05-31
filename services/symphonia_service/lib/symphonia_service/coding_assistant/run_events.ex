@@ -36,6 +36,7 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
     "Creating sandbox" => "Creating sandbox",
     "Preparing sandbox workspace" => "Preparing sandbox workspace",
     "Running Codex in sandbox" => "Running Codex in sandbox",
+    "Running Gemini in sandbox" => "Running Gemini in sandbox",
     "Receiving sandbox changes" => "Receiving sandbox changes",
     "Releasing sandbox" => "Releasing sandbox",
     "Sandbox released" => "Sandbox released",
@@ -98,6 +99,7 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
       "Creating sandbox" -> "Symphonia is creating an isolated sandbox workspace."
       "Preparing sandbox workspace" -> "Symphonia is preparing the sandbox workspace."
       "Running Codex in sandbox" -> "Codex is working inside the sandbox."
+      "Running Gemini in sandbox" -> "Gemini CLI is working inside the sandbox."
       "Receiving sandbox changes" -> "Symphonia is receiving the sandbox patch result."
       "Releasing sandbox" -> "Symphonia is releasing the sandbox workspace."
       "Sandbox released" -> "Sandbox workspace released."

@@ -82,16 +82,32 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
           {:ok, "not-json"}
 
         _other ->
+          {diff, changed_files, summary} =
+            if Application.get_env(:symphonia_service, :opensandbox_result_provider) ==
+                 "gemini_cli" do
+              {
+                gemini_diff(),
+                [%{"path" => "lib/gemini_output.ex", "status" => "added"}],
+                "Gemini CLI produced a reviewable patch."
+              }
+            else
+              {
+                opensandbox_diff(),
+                [%{"path" => "lib/opensandbox_output.ex", "status" => "added"}],
+                "OpenSandbox produced a reviewable patch."
+              }
+            end
+
           {:ok,
            JSON.encode!(%{
              "status" => "completed",
              "patchBundle" => %{
                "format" => "git_diff",
                "encoding" => "utf8",
-               "diff" => opensandbox_diff()
+               "diff" => diff
              },
-             "changedFiles" => [%{"path" => "lib/opensandbox_output.ex", "status" => "added"}],
-             "publicSummary" => "OpenSandbox produced a reviewable patch."
+             "changedFiles" => changed_files,
+             "publicSummary" => summary
            })}
       end
     end
@@ -114,6 +130,20 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
       +++ b/lib/opensandbox_output.ex
       @@ -0,0 +1,2 @@
       +defmodule OpenSandboxOutput do
+      +end
+      """
+      |> String.trim_leading()
+    end
+
+    defp gemini_diff do
+      """
+      diff --git a/lib/gemini_output.ex b/lib/gemini_output.ex
+      new file mode 100644
+      index 0000000..1269488
+      --- /dev/null
+      +++ b/lib/gemini_output.ex
+      @@ -0,0 +1,2 @@
+      +defmodule GeminiOutput do
       +end
       """
       |> String.trim_leading()
@@ -157,6 +187,7 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
     previous_sandboxes_root = System.get_env("SYMPHONIA_SANDBOXES_ROOT")
     previous_opensandbox_endpoint = System.get_env("SYMPHONIA_OPENSANDBOX_ENDPOINT")
     previous_opensandbox_api_key = System.get_env("SYMPHONIA_OPENSANDBOX_API_KEY")
+    previous_gemini_api_key = System.get_env("GEMINI_API_KEY")
 
     System.put_env("SYMPHONIA_GITHUB_APP_ID", "42")
     System.put_env("SYMPHONIA_GITHUB_APP_PRIVATE_KEY_PATH", private_key_path)
@@ -175,11 +206,13 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
       restore_env("SYMPHONIA_SANDBOXES_ROOT", previous_sandboxes_root)
       restore_env("SYMPHONIA_OPENSANDBOX_ENDPOINT", previous_opensandbox_endpoint)
       restore_env("SYMPHONIA_OPENSANDBOX_API_KEY", previous_opensandbox_api_key)
+      restore_env("GEMINI_API_KEY", previous_gemini_api_key)
       Application.delete_env(:symphonia_service, :github_client)
       Application.delete_env(:symphonia_service, :github_home)
       Application.delete_env(:symphonia_service, :opensandbox_client)
       Application.delete_env(:symphonia_service, :opensandbox_test_pid)
       Application.delete_env(:symphonia_service, :opensandbox_failure)
+      Application.delete_env(:symphonia_service, :opensandbox_result_provider)
       File.rm_rf(root)
     end)
 
@@ -280,7 +313,12 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
     registry_path: registry_path,
     repository: repository
   } do
-    missing = SandboxRegistry.readiness(Map.put(repository, "sandboxProvider", "opensandbox"), registry_path)
+    missing =
+      SandboxRegistry.readiness(
+        Map.put(repository, "sandboxProvider", "opensandbox"),
+        registry_path
+      )
+
     refute missing["ready"]
     assert missing["reason"] == "opensandbox_endpoint_missing"
 
@@ -295,7 +333,12 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
         "envName" => "SYMPHONIA_OPENSANDBOX_API_KEY"
       })
 
-    ready = SandboxRegistry.readiness(Map.put(repository, "sandboxProvider", "opensandbox"), registry_path)
+    ready =
+      SandboxRegistry.readiness(
+        Map.put(repository, "sandboxProvider", "opensandbox"),
+        registry_path
+      )
+
     assert ready["ready"]
     assert ready["provider"] == "opensandbox"
     assert ready["credential"] == "environment_reference_configured"
@@ -344,7 +387,10 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
     assert_received {:opensandbox_endpoint, "sandbox_mock", 44_772}
     assert_received {:opensandbox_upload, "/workspace/source.tar", source_size, _execd}
     assert source_size > 0
-    assert_received {:opensandbox_upload, "/workspace/.symphonia/context-pack.json", _context_size, _execd}
+
+    assert_received {:opensandbox_upload, "/workspace/.symphonia/context-pack.json",
+                     _context_size, _execd}
+
     assert_received {:opensandbox_command, prepare_command, _prepare_opts}
     assert prepare_command =~ "git commit --allow-empty -m symphonia-baseline"
     assert_received {:opensandbox_command, runner_command, _runner_opts}
@@ -369,6 +415,117 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
     assert "sandbox.prepare_started" in actions
     assert "sandbox.run_started" in actions
     assert "sandbox.release_completed" in actions
+  end
+
+  test "gemini cli manual run is opensandbox-only and imports through patch importer", %{
+    registry_path: registry_path,
+    remote_path: remote_path
+  } do
+    Application.put_env(:symphonia_service, :opensandbox_client, MockOpenSandboxClient)
+    Application.put_env(:symphonia_service, :opensandbox_test_pid, self())
+    Application.put_env(:symphonia_service, :opensandbox_result_provider, "gemini_cli")
+    System.put_env("SYMPHONIA_OPENSANDBOX_ENDPOINT", "http://opensandbox.example.invalid")
+    System.put_env("SYMPHONIA_OPENSANDBOX_API_KEY", "opensandbox-secret-value")
+    System.put_env("GEMINI_API_KEY", "gemini-secret-value")
+
+    repository = enable_gemini_opensandbox(registry_path)
+    task = create_task(registry_path, repository, "Gemini sandbox success")
+
+    result =
+      start_sandbox_run(registry_path, repository, task, %{
+        "providerId" => "gemini_cli"
+      })
+
+    completed_task = wait_for_task(repository, task["key"], "in_review")
+    assignment = AssignmentStore.get(registry_path, result["assignment"]["id"])
+
+    assert assignment["state"] == "completed"
+    assert assignment["provider"] == "gemini_cli"
+    assert assignment["context_pack"]["provider"] == "gemini_cli"
+    assert assignment["context_pack"]["renderedPrompt"] =~ "OpenSandbox source-bundle workspace"
+    refute assignment["context_pack"]["renderedPrompt"] =~ "Existing Codex thread ID"
+
+    assert completed_task["run"]["provider"] == "gemini_cli"
+    assert completed_task["run"]["executionMode"] == "cloud_sandbox"
+    assert completed_task["handoff"]["summary"] == "Gemini CLI produced a reviewable patch."
+    assert "lib/gemini_output.ex" in completed_task["handoff"]["filesChanged"]
+
+    branch_files =
+      git_output!([
+        "--git-dir",
+        remote_path,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "refs/heads/symphonia/task/#{String.downcase(task["key"])}"
+      ])
+
+    assert branch_files =~ "lib/gemini_output.ex"
+
+    assert_received {:opensandbox_upload, "/workspace/.symphonia/provider-context.json",
+                     _context_size, _execd}
+
+    assert_received {:opensandbox_upload, "/workspace/.symphonia/bin/symphonia-provider-runner",
+                     _script_size, _execd}
+
+    assert_received {:opensandbox_upload, "/workspace/.symphonia/provider-env.json", _env_size,
+                     _execd}
+
+    runner_command =
+      received_commands()
+      |> Enum.find(&String.contains?(&1, "symphonia-provider-runner --provider gemini_cli"))
+
+    assert is_binary(runner_command)
+    assert runner_command =~ "symphonia-provider-runner --provider gemini_cli"
+    refute runner_command =~ "gemini-secret-value"
+    assert_received {:opensandbox_delete, "sandbox_mock"}
+
+    run = RunStore.get(result["run"]["id"])
+    public_run = JSON.encode!(RunStore.public(run))
+    refute public_run =~ "gemini-secret-value"
+    refute public_run =~ assignment["context_pack"]["renderedPrompt"]
+    refute public_run =~ "diff --git"
+
+    task_payload = JSON.encode!(completed_task)
+    refute task_payload =~ "gemini-secret-value"
+    refute task_payload =~ assignment["context_pack"]["renderedPrompt"]
+
+    audit = JSON.encode!(AuditLog.list(registry_path, repository, limit: :all))
+    assert audit =~ "provider.gemini_cli_run_selected"
+    assert audit =~ "provider.gemini_cli_result_received"
+    refute audit =~ "gemini-secret-value"
+    refute audit =~ assignment["context_pack"]["renderedPrompt"]
+    refute audit =~ "diff --git"
+  end
+
+  test "gemini cli run rejects local mode and missing provider allowlist", %{
+    registry_path: registry_path,
+    repository: repository
+  } do
+    task = create_task(registry_path, repository, "Gemini rejected")
+
+    assert_raise ArgumentError, "Gemini CLI runs require cloud_sandbox execution in V1.", fn ->
+      CodingAssistant.start_run(registry_path, repository, task["key"], %{
+        "providerId" => "gemini_cli",
+        "actor" => %{"id" => "maintainer", "name" => "Maintainer", "role" => "maintainer"}
+      })
+    end
+
+    System.put_env("SYMPHONIA_OPENSANDBOX_ENDPOINT", "http://opensandbox.example.invalid")
+    System.put_env("SYMPHONIA_OPENSANDBOX_API_KEY", "opensandbox-secret-value")
+    System.put_env("GEMINI_API_KEY", "gemini-secret-value")
+
+    repository = enable_opensandbox(registry_path)
+    task = create_task(registry_path, repository, "Gemini not allowlisted")
+
+    assert_raise ArgumentError, "Gemini CLI is not allowed for this repository.", fn ->
+      start_sandbox_run(registry_path, repository, task, %{"providerId" => "gemini_cli"})
+    end
+
+    audit = JSON.encode!(AuditLog.list(registry_path, repository, limit: :all))
+    assert audit =~ "provider.gemini_cli_run_denied"
+    assert audit =~ "provider_not_allowed"
+    refute audit =~ "gemini-secret-value"
   end
 
   test "opensandbox source bundle excludes private runtime material", %{
@@ -449,7 +606,10 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
     assert_received {:opensandbox_create, _create_body}
     assert_received {:opensandbox_upload, "/workspace/source.tar", source_size, _execd}
     assert source_size > 0
-    assert_received {:opensandbox_upload, "/workspace/.symphonia/context-pack.json", _context_size, _execd}
+
+    assert_received {:opensandbox_upload, "/workspace/.symphonia/context-pack.json",
+                     _context_size, _execd}
+
     assert_received {:opensandbox_command, prepare_command, _prepare_opts}
     assert prepare_command =~ "git commit --allow-empty -m symphonia-baseline"
     assert_received {:opensandbox_command, smoke_command, _smoke_opts}
@@ -577,7 +737,9 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
 
     assert assignment["state"] == "completed"
     assert completed_task["run"]["cleanupWarning"]["code"] == "sandbox_release_failed"
-    assert completed_task["run"]["cleanupWarning"]["message"] == "Sandbox cleanup needs attention."
+
+    assert completed_task["run"]["cleanupWarning"]["message"] ==
+             "Sandbox cleanup needs attention."
 
     actions = audit_actions(registry_path)
     assert "sandbox.release_failed" in actions
@@ -626,8 +788,14 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
       })
 
     wait_for_task(repository, run_failure_task["key"], "paused")
-    assert AssignmentStore.get(registry_path, run_failure["assignment"]["id"])["state"] == "failed"
-    assert Enum.map(wait_for_event_steps(run_failure_events, ["create", "prepare", "release"]), & &1["step"]) ==
+
+    assert AssignmentStore.get(registry_path, run_failure["assignment"]["id"])["state"] ==
+             "failed"
+
+    assert Enum.map(
+             wait_for_event_steps(run_failure_events, ["create", "prepare", "release"]),
+             & &1["step"]
+           ) ==
              ["create", "prepare", "release"]
 
     import_failure_task = create_task(registry_path, repository, "Cloud sandbox import failure")
@@ -640,7 +808,9 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
       })
 
     wait_for_task(repository, import_failure_task["key"], "paused")
-    assert AssignmentStore.get(registry_path, import_failure["assignment"]["id"])["state"] == "failed"
+
+    assert AssignmentStore.get(registry_path, import_failure["assignment"]["id"])["state"] ==
+             "failed"
 
     events = wait_for_event_steps(import_failure_events, ["create", "prepare", "run", "release"])
     assert Enum.map(events, & &1["step"]) == ["create", "prepare", "run", "release"]
@@ -693,6 +863,23 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
     })
   end
 
+  defp enable_gemini_opensandbox(registry_path) do
+    repository = enable_opensandbox(registry_path)
+
+    {:ok, _reference} =
+      SecretReferences.create(registry_path, repository, %{
+        "label" => "Gemini API key",
+        "scope" => "provider.gemini_cli",
+        "source" => "environment",
+        "envName" => "GEMINI_API_KEY"
+      })
+
+    SymphoniaService.Runners.RepositoryPolicy.update_policy(registry_path, "SYM", %{
+      "allowedSandboxProviders" => ["opensandbox"],
+      "allowedCodingAssistantProviders" => ["codex_app_server", "gemini_cli"]
+    })
+  end
+
   defp create_task(registry_path, repository, title) do
     TaskStore.create_task(registry_path, repository, %{
       "title" => title,
@@ -730,7 +917,9 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
   end
 
   defp wait_for_task(repository, task_key, status, 0) do
-    flunk("task #{task_key} did not reach #{status}: #{inspect(TaskStore.get_task(repository, task_key))}")
+    flunk(
+      "task #{task_key} did not reach #{status}: #{inspect(TaskStore.get_task(repository, task_key))}"
+    )
   end
 
   defp sandbox_events(path) do
@@ -757,6 +946,14 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
   defp wait_for_event_steps(path, expected_steps, 0) do
     events = if File.exists?(path), do: sandbox_events(path), else: []
     flunk("sandbox events did not reach #{inspect(expected_steps)}: #{inspect(events)}")
+  end
+
+  defp received_commands(commands \\ []) do
+    receive do
+      {:opensandbox_command, command, _opts} -> received_commands([command | commands])
+    after
+      0 -> Enum.reverse(commands)
+    end
   end
 
   defp audit_actions(registry_path) do

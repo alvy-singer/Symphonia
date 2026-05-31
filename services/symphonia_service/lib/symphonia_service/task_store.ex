@@ -450,6 +450,7 @@ defmodule SymphoniaService.TaskStore do
       "id" => run["id"],
       "kind" => run["kind"],
       "state" => run["state"],
+      "provider" => run["provider"],
       "label" => RunEvents.label(run["state"]),
       "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
       "message" => RunEvents.public_message(run),

@@ -9,6 +9,7 @@ defmodule SymphoniaService.CodingAssistant do
     Cancellation,
     AppServerProvider,
     CodexProvider,
+    GeminiCliProvider,
     LocalDemoProvider,
     ProviderCatalog,
     RunEvents,
@@ -18,7 +19,15 @@ defmodule SymphoniaService.CodingAssistant do
 
   alias SymphoniaService.Access.{Actor, AuditLog}
   alias SymphoniaService.Runner.CloudSandboxProvider
-  alias SymphoniaService.Runners.{Assignments, AssignmentStore, LocalService, SelectionPolicy}
+
+  alias SymphoniaService.Runners.{
+    Assignments,
+    AssignmentStore,
+    LocalService,
+    RepositoryPolicy,
+    SelectionPolicy
+  }
+
   alias SymphoniaService.Sandbox.Registry
   alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
   alias SymphoniaService.TaskStore
@@ -29,7 +38,7 @@ defmodule SymphoniaService.CodingAssistant do
     task = get_task!(repository, task_key)
     ensure_assignable!(task)
 
-    provider = provider()
+    provider = provider(params)
 
     runner =
       if SandboxPolicy.requested?(params) do
@@ -40,11 +49,11 @@ defmodule SymphoniaService.CodingAssistant do
 
     if remote_runner?(runner), do: Assignments.preflight(repository, task)
     if cloud_sandbox?(runner), do: sandbox_preflight!(registry_path, repository, task, params)
-    run_provider = if cloud_sandbox?(runner), do: AppServerProvider, else: provider
+    provider_preflight!(registry_path, repository, task, params, provider, runner)
 
     run =
       RunStore.create(%{
-        "provider" => provider_id(run_provider),
+        "provider" => provider_id(provider),
         "repository" => repository["key"],
         "task" => task_key,
         "kind" => "assignment",
@@ -59,26 +68,26 @@ defmodule SymphoniaService.CodingAssistant do
 
     cond do
       remote_runner?(runner) ->
-      actor = Map.get(params, "actor", Actor.default())
+        actor = Map.get(params, "actor", Actor.default())
 
-      {:ok, assignment} =
-        Assignments.create_for_run(registry_path, repository, task, run, runner, actor, params)
+        {:ok, assignment} =
+          Assignments.create_for_run(registry_path, repository, task, run, runner, actor, params)
 
-      run =
-        run
-        |> RunStore.update_metadata(%{
-          "assignment_id" => assignment["id"],
-          "execution_mode" => "remote"
-        })
-        |> RunStore.mark_step("Queued for runner")
+        run =
+          run
+          |> RunStore.update_metadata(%{
+            "assignment_id" => assignment["id"],
+            "execution_mode" => "remote"
+          })
+          |> RunStore.mark_step("Queued for runner")
 
-      task = put_task_run(repository, task_key, run)
+        task = put_task_run(repository, task_key, run)
 
-      %{
-        "run" => RunStore.public(run),
-        "task" => task,
-        "assignment" => AssignmentStore.public(assignment)
-      }
+        %{
+          "run" => RunStore.public(run),
+          "task" => task,
+          "assignment" => AssignmentStore.public(assignment)
+        }
 
       cloud_sandbox?(runner) ->
         actor = Map.get(params, "actor", Actor.default())
@@ -123,18 +132,18 @@ defmodule SymphoniaService.CodingAssistant do
         }
 
       true ->
-      {:ok, _pid} =
-        RunSupervisor.start_run(%{
-          "registry_path" => registry_path,
-          "repository" => repository,
-          "task_key" => task_key,
-          "provider" => provider,
-          "params" => params,
-          "kind" => "assignment",
-          "run" => run
-        })
+        {:ok, _pid} =
+          RunSupervisor.start_run(%{
+            "registry_path" => registry_path,
+            "repository" => repository,
+            "task_key" => task_key,
+            "provider" => provider,
+            "params" => params,
+            "kind" => "assignment",
+            "run" => run
+          })
 
-      %{"run" => RunStore.public(run), "task" => task}
+        %{"run" => RunStore.public(run), "task" => task}
     end
   end
 
@@ -179,6 +188,10 @@ defmodule SymphoniaService.CodingAssistant do
   end
 
   def continue_from_review_notes(registry_path, repository, task_key, params \\ %{}) do
+    if requested_provider_id(params) == "gemini_cli" do
+      raise ArgumentError, "Gemini CLI is not available for review continuation in V1."
+    end
+
     task = get_task!(repository, task_key)
     ensure_reviewable!(task)
 
@@ -364,6 +377,7 @@ defmodule SymphoniaService.CodingAssistant do
       "id" => run["id"],
       "kind" => run["kind"],
       "state" => run["state"],
+      "provider" => run["provider"],
       "current_step" => run["current_step"],
       "message" => RunEvents.public_message(run),
       "display_step" => RunEvents.display_step(run),
@@ -387,7 +401,16 @@ defmodule SymphoniaService.CodingAssistant do
     |> Map.new()
   end
 
-  defp provider do
+  defp provider(params \\ %{}) do
+    case requested_provider_id(params) do
+      "gemini_cli" -> GeminiCliProvider
+      "codex_app_server" -> AppServerProvider
+      nil -> default_provider()
+      _other -> raise ArgumentError, "Unsupported Coding Assistant provider."
+    end
+  end
+
+  defp default_provider do
     Application.get_env(:symphonia_service, :coding_assistant_provider) ||
       provider_from_env(System.get_env("SYMPHONIA_CODING_ASSISTANT_PROVIDER"))
   end
@@ -397,6 +420,12 @@ defmodule SymphoniaService.CodingAssistant do
   defp provider_from_env("codex"), do: CodexProvider
   defp provider_from_env("codex_exec"), do: CodexProvider
   defp provider_from_env(_value), do: AppServerProvider
+
+  defp requested_provider_id(params) when is_map(params) do
+    params["providerId"] || params["provider_id"]
+  end
+
+  defp requested_provider_id(_params), do: nil
 
   defp provider_id(provider) do
     if Code.ensure_loaded?(provider) and function_exported?(provider, :id, 0) do
@@ -447,6 +476,70 @@ defmodule SymphoniaService.CodingAssistant do
         audit_sandbox_denied(registry_path, repository, actor, task, reason)
         raise ArgumentError, to_string(reason)
     end
+  end
+
+  defp provider_preflight!(
+         registry_path,
+         repository,
+         task,
+         params,
+         GeminiCliProvider,
+         %{"mode" => "cloud_sandbox"}
+       ) do
+    actor = Map.get(params, "actor", Actor.default())
+
+    cond do
+      not RepositoryPolicy.coding_assistant_provider_allowed?(repository, "gemini_cli") ->
+        audit_provider_denied(registry_path, repository, actor, task, "provider_not_allowed")
+        raise ArgumentError, "Gemini CLI is not allowed for this repository."
+
+      GeminiCliProvider.readiness(registry_path: registry_path, repository: repository)["ready"] !=
+          true ->
+        audit_provider_denied(registry_path, repository, actor, task, "gemini_api_key_missing")
+        raise ArgumentError, "Gemini CLI is not configured."
+
+      SandboxPolicy.provider(repository) != "opensandbox" ->
+        audit_provider_denied(
+          registry_path,
+          repository,
+          actor,
+          task,
+          "sandbox_provider_not_allowed"
+        )
+
+        raise ArgumentError, "Gemini CLI requires OpenSandbox execution."
+
+      true ->
+        :ok
+    end
+  end
+
+  defp provider_preflight!(registry_path, repository, task, params, GeminiCliProvider, _runner) do
+    actor = Map.get(params, "actor", Actor.default())
+    audit_provider_denied(registry_path, repository, actor, task, "gemini_requires_cloud_sandbox")
+    raise ArgumentError, "Gemini CLI runs require cloud_sandbox execution in V1."
+  end
+
+  defp provider_preflight!(_registry_path, _repository, _task, _params, _provider, _runner),
+    do: :ok
+
+  defp audit_provider_denied(registry_path, repository, actor, task, reason) do
+    AuditLog.record(registry_path, repository, %{
+      "actor" => actor,
+      "action" => "provider.gemini_cli_run_denied",
+      "target" => %{"type" => "task", "id" => task["key"]},
+      "result" => "denied",
+      "metadata" => %{
+        "taskKey" => task["key"],
+        "provider" => "gemini_cli",
+        "workspaceProvider" => "cloud_sandbox",
+        "reasonCode" => reason
+      }
+    })
+
+    :ok
+  rescue
+    _error -> :ok
   end
 
   defp audit_sandbox_denied(registry_path, repository, actor, task, reason) do

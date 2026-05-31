@@ -259,12 +259,23 @@ defmodule SymphoniaService.HTTPServer do
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "automation" => Automation.status(repository)}}
 
+      ["api", "repositories", repo, "coding-assistants", "providers"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        {200,
+         ProviderCatalog.readiness_status(
+           mode: :check_only,
+           repository: repository,
+           registry_path: registry_path
+         )}
+
       ["api", "repositories", repo, "remote-execution"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         {200, %{"repo" => repository["key"], "policy" => RepositoryPolicy.public(repository)}}
 
       ["api", "repositories", repo, "sandbox-policy"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
+
         {200,
          %{
            "repo" => repository["key"],
@@ -465,18 +476,24 @@ defmodule SymphoniaService.HTTPServer do
   defp route(%{method: "POST", path: path, body: body, headers: headers}, registry_path, actor) do
     case path_parts(path) do
       ["api", "runners", "pairing-tokens"] ->
-        guarded_runner_action(registry_path, actor, "runner.pair", runner_target(), fn ->
-          {:ok, pairing, token} = Pairing.create(registry_path, actor, decode_json(body))
+        guarded_runner_action(
+          registry_path,
+          actor,
+          "runner.pair",
+          runner_target(),
+          fn ->
+            {:ok, pairing, token} = Pairing.create(registry_path, actor, decode_json(body))
 
-          {201,
-           %{
-             "pairingToken" => token,
-             "expiresAt" => pairing["expiresAt"],
-             "runnerName" => pairing["name"],
-             "message" => "Copy this token now. It will not be shown again."
-           }, runner_target(pairing["id"]),
-           %{"reasonCode" => "pairing_token_created"}}
-        end, "runner.pairing_token_created")
+            {201,
+             %{
+               "pairingToken" => token,
+               "expiresAt" => pairing["expiresAt"],
+               "runnerName" => pairing["name"],
+               "message" => "Copy this token now. It will not be shown again."
+             }, runner_target(pairing["id"]), %{"reasonCode" => "pairing_token_created"}}
+          end,
+          "runner.pairing_token_created"
+        )
 
       ["api", "runners", "register"] ->
         case Registry.register(registry_path, actor, decode_json(body)) do
@@ -610,10 +627,15 @@ defmodule SymphoniaService.HTTPServer do
             {403, %{"error" => "Runner is revoked.", "reasonCode" => "runner_revoked"}}
 
           {:error, :runner_token_rotated} ->
-            {403, %{"error" => "Runner token has been rotated.", "reasonCode" => "runner_token_rotated"}}
+            {403,
+             %{
+               "error" => "Runner token has been rotated.",
+               "reasonCode" => "runner_token_rotated"
+             }}
 
           {:error, :runner_token_revoked} ->
-            {403, %{"error" => "Runner token is revoked.", "reasonCode" => "runner_token_revoked"}}
+            {403,
+             %{"error" => "Runner token is revoked.", "reasonCode" => "runner_token_revoked"}}
 
           {:error, :not_found} ->
             {404, %{"error" => "Runner not found.", "reasonCode" => "runner_not_found"}}
@@ -1052,6 +1074,7 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "repositories", repo, "sandbox-policy"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
         payload = decode_json(body)
+
         allowed? =
           payload["sandboxExecutionAllowed"] == true or
             payload["sandbox_execution_allowed"] == true
@@ -1334,7 +1357,8 @@ defmodule SymphoniaService.HTTPServer do
     metadata =
       %{
         "taskKey" => task_key,
-        "workspaceProvider" => workspace_provider(payload) || execution_workspace_provider(payload),
+        "workspaceProvider" =>
+          workspace_provider(payload) || execution_workspace_provider(payload),
         "provider" => "codex_app_server"
       }
       |> reject_nil()
@@ -1870,6 +1894,8 @@ defmodule SymphoniaService.HTTPServer do
       "sandboxProviderReadiness" => SymphoniaService.Sandbox.Registry.readiness(repository, nil),
       "allowedRunnerIds" => RepositoryPolicy.allowed_runner_ids(repository),
       "allowedSandboxProviders" => RepositoryPolicy.allowed_sandbox_providers(repository),
+      "allowedCodingAssistantProviders" =>
+        RepositoryPolicy.allowed_coding_assistant_providers(repository),
       "requireTrustedRunner" => true,
       "secretScopesAllowed" => RepositoryPolicy.secret_scopes_allowed(repository)
     })

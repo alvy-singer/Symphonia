@@ -30,7 +30,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
       |> Kernel.++(workspace_checks(repository))
       |> Kernel.++(planning_checks(repository))
       |> Kernel.++(automation_checks(repository, registry_path))
-      |> Kernel.++(provider_checks())
+      |> Kernel.++(provider_checks(repository, registry_path))
       |> Kernel.++(runner_checks(repository, registry_path))
       |> Kernel.++(sandbox_checks(repository, registry_path))
       |> Kernel.++(secret_checks(repository, registry_path))
@@ -311,11 +311,21 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
     ]
   end
 
-  defp provider_checks do
-    status = ProviderCatalog.readiness_status(mode: :check_only)
+  defp provider_checks(repository, registry_path) do
+    status =
+      ProviderCatalog.readiness_status(
+        mode: :check_only,
+        repository: repository,
+        registry_path: registry_path
+      )
+
     providers = Map.new(status["providers"] || [], &{&1["id"], &1})
     codex = providers["codex_app_server"] || %{}
+    gemini = providers["gemini_cli"] || %{}
     codex_contract? = codex["runnableByHarness"] == true and codex["missingCapabilities"] == []
+
+    gemini_allowed? =
+      RepositoryPolicy.coding_assistant_provider_allowed?(repository, "gemini_cli")
 
     non_codex_disabled? =
       providers
@@ -383,6 +393,26 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
           do: "Only Codex App Server is runnable by Harness V2.",
           else: "Non-Codex providers must remain disabled for Harness V2."
         )
+      ),
+      check(
+        "gemini_cli_manual",
+        "Gemini CLI provider",
+        cond do
+          gemini_allowed? and gemini["ready"] == true -> "passed"
+          gemini_allowed? -> "failed"
+          true -> "not_checked"
+        end,
+        "provider",
+        cond do
+          gemini_allowed? and gemini["ready"] == true ->
+            "Gemini CLI is configured for manual OpenSandbox runs."
+
+          gemini_allowed? ->
+            safe_detail(gemini["reason"] || "Gemini CLI needs setup.")
+
+          true ->
+            "Gemini CLI is not allowlisted for this repository."
+        end
       )
     ]
   end
@@ -532,7 +562,7 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
             sandbox_readiness_message(readiness)
 
           true ->
-          "Sandbox provider is not configured."
+            "Sandbox provider is not configured."
         end
       ),
       check(
@@ -636,7 +666,9 @@ defmodule SymphoniaService.Readiness.RepositoryReadiness do
   defp secret_checks(repository, registry_path) do
     references = SecretReferences.list(registry_path, repository)
     allowed_scopes = RepositoryPolicy.secret_scopes_allowed(repository)
-    configured_scopes = references |> Enum.filter(&(&1["configured"] == true)) |> Enum.map(& &1["scope"])
+
+    configured_scopes =
+      references |> Enum.filter(&(&1["configured"] == true)) |> Enum.map(& &1["scope"])
 
     missing_allowed_scopes = allowed_scopes -- configured_scopes
 

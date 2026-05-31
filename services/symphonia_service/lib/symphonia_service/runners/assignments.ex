@@ -62,6 +62,7 @@ defmodule SymphoniaService.Runners.Assignments do
     base_branch = base_branch(repository)
     base_sha = current_head_sha!(repository["path"])
     head_branch = BranchManager.task_branch(task)
+    provider = sandbox_provider(params)
 
     assignment =
       AssignmentStore.create(registry_path, %{
@@ -72,14 +73,16 @@ defmodule SymphoniaService.Runners.Assignments do
         "runner_mode" => "cloud_sandbox",
         "runner" => runner,
         "state" => "queued",
-        "provider" => "codex_app_server",
+        "provider" => provider,
         "workspace_provider" => "cloud_sandbox",
         "base_branch" => base_branch,
         "base_sha" => base_sha,
         "repository" => repository_payload(repository, base_branch, base_sha),
-        "context_pack" => public_context_pack(repository, task, base_branch, head_branch),
+        "context_pack" =>
+          sandbox_context_pack(repository, task, base_branch, head_branch, provider, params),
         "params" => sandbox_params(params)
       })
+      |> finalize_sandbox_context(registry_path)
 
     audit(registry_path, repository, actor, "sandbox.run_selected", assignment, "completed",
       workspaceProvider: "cloud_sandbox"
@@ -89,8 +92,36 @@ defmodule SymphoniaService.Runners.Assignments do
       workspaceProvider: "cloud_sandbox"
     )
 
+    if provider == "gemini_cli" do
+      audit(
+        registry_path,
+        repository,
+        actor,
+        "provider.gemini_cli_run_selected",
+        assignment,
+        "completed", workspaceProvider: "cloud_sandbox")
+    end
+
     {:ok, assignment}
   end
+
+  defp finalize_sandbox_context(%{"provider" => "gemini_cli"} = assignment, registry_path) do
+    context =
+      assignment["context_pack"]
+      |> Map.put("assignmentId", assignment["id"])
+      |> Map.put("runId", assignment["run_id"])
+      |> Map.put("runnerId", assignment["runner_id"])
+      |> Map.put("baseSha", assignment["base_sha"])
+
+    {:ok, updated} =
+      AssignmentStore.update(registry_path, assignment["id"], fn assignment ->
+        {:ok, Map.put(assignment, "context_pack", context)}
+      end)
+
+    updated
+  end
+
+  defp finalize_sandbox_context(assignment, _registry_path), do: assignment
 
   def claim(registry_path, runner_id, token) do
     with {:ok, _runner} <- authenticate_runner(registry_path, runner_id),
@@ -207,10 +238,11 @@ defmodule SymphoniaService.Runners.Assignments do
             AssignmentStore.transition(registry_path, assignment_id, "failed", %{
               "failure_class" => failure_class,
               "public_message" => public_message,
-              "result_digest" => RemoteResult.failure_digest(%{
-                "failureClass" => failure_class,
-                "publicMessage" => public_message
-              })
+              "result_digest" =>
+                RemoteResult.failure_digest(%{
+                  "failureClass" => failure_class,
+                  "publicMessage" => public_message
+                })
             })
 
           fail_run_for_assignment(registry_path, failed, failure_class, public_message)
@@ -610,6 +642,29 @@ defmodule SymphoniaService.Runners.Assignments do
       "context" =>
         Map.drop(ContextPack.build(repository, task, context), ["existingCodexThreadId"])
     }
+  end
+
+  defp sandbox_context_pack(repository, task, base_branch, head_branch, "gemini_cli", params) do
+    context = %{
+      base_branch: base_branch,
+      head_branch: head_branch,
+      repo_path: "sandbox source-bundle workspace",
+      persistent: false,
+      workspace_provider: "cloud_sandbox"
+    }
+
+    ContextPack.provider_context(repository, task, context, params, provider: :gemini_cli)
+  end
+
+  defp sandbox_context_pack(repository, task, base_branch, head_branch, _provider, _params) do
+    public_context_pack(repository, task, base_branch, head_branch)
+  end
+
+  defp sandbox_provider(params) do
+    case params["providerId"] || params["provider_id"] || "codex_app_server" do
+      "gemini_cli" -> "gemini_cli"
+      _other -> "codex_app_server"
+    end
   end
 
   defp repository_payload(repository, base_branch, base_sha) do

@@ -40,6 +40,7 @@ import {
   reviewGateTone,
   runDisplayForTask,
   runOriginLabel,
+  runProviderLabel,
   runRunnerLabel,
   runTimelineForTask,
   safeReviewBranch,
@@ -101,6 +102,34 @@ async function fetchRepositoryAccess(repoKey: string): Promise<RepositoryAccess>
   const payload = (await res.json()) as RepositoryAccess & { error?: string };
   if (!res.ok) throw new Error(payload.error ?? "Could not load repository access");
   return payload;
+}
+
+interface RemoteExecutionPolicy {
+  allowedSandboxProviders?: string[];
+  allowedCodingAssistantProviders?: string[];
+}
+
+interface SandboxPolicy {
+  sandboxExecutionAllowed?: boolean;
+  sandboxProvider?: string | null;
+}
+
+async function fetchRemoteExecutionPolicy(repoKey: string): Promise<RemoteExecutionPolicy> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/remote-execution`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { policy?: RemoteExecutionPolicy; error?: string };
+  if (!res.ok || !payload.policy) throw new Error(payload.error ?? "Could not load provider policy");
+  return payload.policy;
+}
+
+async function fetchSandboxPolicy(repoKey: string): Promise<SandboxPolicy> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/sandbox-policy`, {
+    cache: "no-store",
+  });
+  const payload = (await res.json()) as { policy?: SandboxPolicy; error?: string };
+  if (!res.ok || !payload.policy) throw new Error(payload.error ?? "Could not load sandbox policy");
+  return payload.policy;
 }
 
 async function fetchTaskAudit(repoKey: string, taskKey: string): Promise<AuditEvent[]> {
@@ -185,6 +214,7 @@ async function refreshPullRequest(
 async function startCodingAssistantRun(
   repoKey: string,
   taskKey: string,
+  payload: Record<string, unknown> = {},
 ): Promise<ServiceTask> {
   const res = await fetch(
     `/api/repositories/${encodeURIComponent(repoKey)}/tasks/${encodeURIComponent(
@@ -193,7 +223,7 @@ async function startCodingAssistantRun(
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify(payload),
     },
   );
   const data = (await res.json()) as { task?: ServiceTask; error?: string };
@@ -357,6 +387,7 @@ type TaskAction =
       label: string;
       kind:
         | "coding_assistant_run"
+        | "gemini_cli_run"
         | "cancel_run"
         | "open_pull_request"
         | "refresh_pr"
@@ -382,6 +413,8 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
   const [task, setTask] = useState<ServiceTask | null>(null);
   const [eligibility, setEligibility] = useState<TaskEligibilityExplanation | null>(null);
   const [access, setAccess] = useState<RepositoryAccess | null>(null);
+  const [remotePolicy, setRemotePolicy] = useState<RemoteExecutionPolicy | null>(null);
+  const [sandboxPolicy, setSandboxPolicy] = useState<SandboxPolicy | null>(null);
   const [taskAudit, setTaskAudit] = useState<AuditEvent[]>([]);
   const [runEvents, setRunEvents] = useState<CodingAssistantRunEvent[]>([]);
   const [title, setTitle] = useState("");
@@ -406,13 +439,17 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
       fetchTask(repoKey, taskKey),
       fetchEligibility(repoKey, taskKey).catch(() => null),
       fetchRepositoryAccess(repoKey).catch(() => null),
+      fetchRemoteExecutionPolicy(repoKey).catch(() => null),
+      fetchSandboxPolicy(repoKey).catch(() => null),
       fetchTaskAudit(repoKey, taskKey).catch(() => []),
     ])
-      .then(([loaded, loadedEligibility, loadedAccess, loadedAudit]) => {
+      .then(([loaded, loadedEligibility, loadedAccess, loadedRemotePolicy, loadedSandboxPolicy, loadedAudit]) => {
         if (cancelled) return;
         setTask(loaded);
         setEligibility(loadedEligibility);
         setAccess(loadedAccess);
+        setRemotePolicy(loadedRemotePolicy);
+        setSandboxPolicy(loadedSandboxPolicy);
         setTaskAudit(loadedAudit);
         setRunEvents(loaded.run?.timeline ?? []);
         setTitle(loaded.title);
@@ -629,6 +666,12 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
 
       if (action.kind === "coding_assistant_run") {
         updated = await startCodingAssistantRun(repoKey, task.key);
+      } else if (action.kind === "gemini_cli_run") {
+        updated = await startCodingAssistantRun(repoKey, task.key, {
+          providerId: "gemini_cli",
+          executionMode: "cloud_sandbox",
+          allowSandboxExecution: true,
+        });
       } else if (action.kind === "cancel_run" && task.run) {
         updated = await cancelCodingAssistantRun(repoKey, task.key, task.run.id);
       } else {
@@ -637,7 +680,7 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         setNotice(result.refreshResult.message);
       }
 
-      if (action.kind === "coding_assistant_run") {
+      if (action.kind === "coding_assistant_run" || action.kind === "gemini_cli_run") {
         window.dispatchEvent(
           new CustomEvent("symphonia:codexRunStarted", {
             detail: { repoKey, taskKey: task.key },
@@ -731,7 +774,15 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
     }
   };
 
-  const availableActions = useMemo(() => (task ? actionsForTask(task) : []), [task]);
+  const availableActions = useMemo(
+    () =>
+      task
+        ? actionsForTask(task, {
+            geminiAvailable: canRunGeminiCli(access, remotePolicy, sandboxPolicy),
+          })
+        : [],
+    [access, remotePolicy, sandboxPolicy, task],
+  );
 
   if (!task && !error) {
     return (
@@ -769,9 +820,9 @@ export function TaskPage({ repoKey, pageIdOrTaskKey }: Props) {
         </div>
       )}
 
-      {(pending === "coding_assistant_run" || activeRun) && (
+      {((pending === "coding_assistant_run" || pending === "gemini_cli_run") || activeRun) && (
         <div className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
-          <span>Codex is working</span>
+          <span>{task.run?.provider === "gemini_cli" ? "Gemini CLI is working" : "Codex is working"}</span>
           {activeRunDisplay.step && (
             <span className="ml-2 text-foreground">- {activeRunDisplay.step}</span>
           )}
@@ -1056,6 +1107,11 @@ function TaskMeta({
         </div>
       </Section>
       {run && (
+        <Section title="Provider">
+          <span className="text-muted-foreground">{runProviderLabel(run)}</span>
+        </Section>
+      )}
+      {run && (
         <Section title="Runner">
           <span className="text-muted-foreground">{runRunnerLabel(run)}</span>
         </Section>
@@ -1085,7 +1141,9 @@ function TaskMeta({
           )}
           {run?.executionMode === "cloud_sandbox" && (
             <p>
-              Codex ran in an isolated sandbox. Symphonia imported and validated changes locally before review.
+              {run.provider === "gemini_cli"
+                ? "Gemini CLI ran in OpenSandbox. Symphonia imported and validated its patch locally before review."
+                : "Codex ran in an isolated sandbox. Symphonia imported and validated changes locally before review."}
             </p>
           )}
           {run?.cleanupWarning && <p>{run.cleanupWarning.message}</p>}
@@ -1587,7 +1645,9 @@ function openPullRequestDetails(task: ServiceTask, handoff: ReturnType<typeof re
 
 function taskActionPermission(action: TaskAction): PermissionKey | undefined {
   if (action.kind === "view_pr") return undefined;
-  if (action.kind === "coding_assistant_run") return "task.run_codex";
+  if (action.kind === "coding_assistant_run" || action.kind === "gemini_cli_run") {
+    return "task.run_codex";
+  }
   if (action.kind === "cancel_run") return "task.cancel_run";
   if (action.kind === "open_pull_request") return "pull_request.open";
   if (action.kind === "refresh_pr") return "pull_request.refresh";
@@ -1605,6 +1665,21 @@ function taskActionDisabledReason(
   const permission = taskActionPermission(action);
   if (!permission || canAccess(access, permission)) return undefined;
   return disabledReason(access, permission);
+}
+
+function canRunGeminiCli(
+  access: RepositoryAccess | null,
+  remotePolicy: RemoteExecutionPolicy | null,
+  sandboxPolicy: SandboxPolicy | null,
+): boolean {
+  return (
+    canAccess(access, "task.run_codex") &&
+    canAccess(access, "sandbox.run") &&
+    sandboxPolicy?.sandboxExecutionAllowed === true &&
+    sandboxPolicy?.sandboxProvider === "opensandbox" &&
+    (remotePolicy?.allowedSandboxProviders ?? []).includes("opensandbox") &&
+    (remotePolicy?.allowedCodingAssistantProviders ?? []).includes("gemini_cli")
+  );
 }
 
 function validationStatusLabel(status: string): string {
@@ -1702,7 +1777,20 @@ function Panel({
   );
 }
 
-function actionsForTask(task: ServiceTask): TaskAction[] {
+function actionsForTask(
+  task: ServiceTask,
+  opts: { geminiAvailable?: boolean } = {},
+): TaskAction[] {
+  const geminiAction = opts.geminiAvailable
+    ? [
+        {
+          label: "Run Gemini CLI in sandbox",
+          kind: "gemini_cli_run" as const,
+          icon: <Sparkles className="h-3.5 w-3.5" />,
+        },
+      ]
+    : [];
+
   switch (task.status) {
     case "todo":
       return [
@@ -1712,6 +1800,7 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
           icon: <Sparkles className="h-3.5 w-3.5" />,
           primary: true,
         },
+        ...geminiAction,
       ];
     case "in_progress":
       return task.run && isActiveRun(task.run)
@@ -1735,6 +1824,7 @@ function actionsForTask(task: ServiceTask): TaskAction[] {
           icon: <RotateCcw className="h-3.5 w-3.5" />,
           primary: true,
         },
+        ...geminiAction,
         {
           label: "Cancel task",
           kind: "event",

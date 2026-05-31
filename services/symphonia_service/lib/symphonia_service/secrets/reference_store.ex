@@ -6,7 +6,7 @@ defmodule SymphoniaService.Secrets.ReferenceStore do
   returned.
   """
 
-  @scopes ~w(repo.checkout provider.codex_app_server sandbox.provider validation.env)
+  @scopes ~w(repo.checkout provider.codex_app_server provider.gemini_cli sandbox.provider validation.env)
   @sources ~w(environment)
 
   def scopes, do: @scopes
@@ -50,7 +50,11 @@ defmodule SymphoniaService.Secrets.ReferenceStore do
         {:error, :not_found}
 
       ref ->
-        write(registry_path, Enum.reject(refs, &(&1["id"] == secret_ref_id and &1["repoKey"] == repo_key)))
+        write(
+          registry_path,
+          Enum.reject(refs, &(&1["id"] == secret_ref_id and &1["repoKey"] == repo_key))
+        )
+
         {:ok, public(ref)}
     end
   end

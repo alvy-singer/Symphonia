@@ -397,10 +397,18 @@ defmodule SymphoniaService.RepositoryRegistry do
     |> maybe_put_boolean("remoteExecutionAllowed", remote_execution_allowed?(repository))
     |> maybe_put_boolean("sandboxExecutionAllowed", sandbox_execution_allowed?(repository))
     |> maybe_put_string("sandboxProvider", sandbox_provider(repository))
-    |> maybe_put_list("allowedRunnerIds", repository["allowedRunnerIds"] || repository["allowed_runner_ids"])
+    |> maybe_put_list(
+      "allowedRunnerIds",
+      repository["allowedRunnerIds"] || repository["allowed_runner_ids"]
+    )
     |> maybe_put_list(
       "allowedSandboxProviders",
       repository["allowedSandboxProviders"] || repository["allowed_sandbox_providers"]
+    )
+    |> maybe_put_list(
+      "allowedCodingAssistantProviders",
+      repository["allowedCodingAssistantProviders"] ||
+        repository["allowed_coding_assistant_providers"]
     )
     |> maybe_put_list(
       "secretScopesAllowed",
@@ -413,9 +421,15 @@ defmodule SymphoniaService.RepositoryRegistry do
   defp maybe_put_map(map, _key, _value), do: map
   defp maybe_put_boolean(map, key, value) when is_boolean(value), do: Map.put(map, key, value)
   defp maybe_put_boolean(map, _key, _value), do: map
-  defp maybe_put_string(map, key, value) when is_binary(value) and value != "", do: Map.put(map, key, value)
+
+  defp maybe_put_string(map, key, value) when is_binary(value) and value != "",
+    do: Map.put(map, key, value)
+
   defp maybe_put_string(map, _key, _value), do: map
-  defp maybe_put_list(map, key, value) when is_list(value), do: Map.put(map, key, Enum.filter(value, &is_binary/1))
+
+  defp maybe_put_list(map, key, value) when is_list(value),
+    do: Map.put(map, key, Enum.filter(value, &is_binary/1))
+
   defp maybe_put_list(map, key, _value), do: Map.put_new(map, key, [])
 
   defp remote_execution_allowed?(repository) do
@@ -423,7 +437,8 @@ defmodule SymphoniaService.RepositoryRegistry do
   end
 
   defp sandbox_execution_allowed?(repository) do
-    repository["sandboxExecutionAllowed"] == true or repository["sandbox_execution_allowed"] == true
+    repository["sandboxExecutionAllowed"] == true or
+      repository["sandbox_execution_allowed"] == true
   end
 
   defp sandbox_provider(repository) do

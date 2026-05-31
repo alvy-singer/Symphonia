@@ -171,6 +171,21 @@ export function runRunnerLabel(run?: CodingAssistantRun | null): string {
   return run?.runner?.name ?? "Local service";
 }
 
+export function runProviderLabel(run?: CodingAssistantRun | null): string {
+  switch (run?.provider) {
+    case "gemini_cli":
+      return "Gemini CLI";
+    case "codex_app_server":
+      return "Codex App Server";
+    case "codex":
+      return "Legacy Codex";
+    case "local_demo":
+      return "Local demo";
+    default:
+      return run?.provider ?? "Coding Assistant";
+  }
+}
+
 export function compactRunBadge(run?: CodingAssistantRun | null): CompactRunBadge | null {
   if (!run) return null;
 

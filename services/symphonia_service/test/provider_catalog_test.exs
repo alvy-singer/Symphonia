@@ -20,7 +20,12 @@ defmodule SymphoniaService.ProviderCatalogTest do
     assert ProviderCatalog.harness_runnable_provider().id() == "codex_app_server"
     assert providers["codex_app_server"]["runnableByHarness"] == true
 
-    for disabled <- ["claude_code", "gemini", "cursor", "codex"] do
+    gemini = providers["gemini_cli"]
+    assert gemini["runnableByHarness"] == false
+    assert gemini["manualOnly"] == true
+    assert gemini["executionMode"] == "cloud_sandbox"
+
+    for disabled <- ["claude_code", "cursor", "codex"] do
       assert providers[disabled]["runnableByHarness"] == false
       assert providers[disabled]["runnable"] == false
       assert is_binary(providers[disabled]["reason"])
@@ -62,7 +67,12 @@ defmodule SymphoniaService.ProviderCatalogTest do
   end
 
   test "existing provider modules implement the required contract callbacks" do
-    for provider <- [AppServerProvider, CodexProvider, LocalDemoProvider] do
+    for provider <- [
+          AppServerProvider,
+          CodexProvider,
+          SymphoniaService.CodingAssistant.GeminiCliProvider,
+          LocalDemoProvider
+        ] do
       assert Code.ensure_loaded?(provider)
       assert function_exported?(provider, :id, 0)
       assert function_exported?(provider, :label, 0)

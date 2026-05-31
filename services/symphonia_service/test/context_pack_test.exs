@@ -251,6 +251,48 @@ defmodule SymphoniaService.ContextPackTest do
     end
   end
 
+  test "gemini prompt is rendered from ContextPack without Codex thread or private output", %{
+    repository: repository,
+    root: root,
+    runs_root: runs_root,
+    task: task
+  } do
+    context = %{
+      base_branch: "main",
+      head_branch: "symphonia/task/sym-1",
+      repo_path: "sandbox source-bundle workspace",
+      persistent: false,
+      workspace_provider: "cloud_sandbox"
+    }
+
+    provider_context =
+      ContextPack.provider_context(
+        repository,
+        task,
+        context,
+        %{"assistant_input" => "Address review."},
+        provider: :gemini_cli
+      )
+
+    prompt = provider_context["renderedPrompt"]
+
+    assert provider_context["provider"] == "gemini_cli"
+    assert prompt =~ "OpenSandbox source-bundle workspace"
+    assert prompt =~ "Task key: #{task["key"]}"
+    assert prompt =~ "Approved milestone"
+    assert prompt =~ "Harness requirements"
+    assert prompt =~ "Do not rely on ambient Gemini memory"
+    assert prompt =~ "Leave validation authority to Symphonía"
+
+    refute prompt =~ "Existing Codex thread ID"
+    refute prompt =~ "thread-private"
+    refute prompt =~ "turn-private"
+    refute prompt =~ "raw transcript secret"
+    refute prompt =~ "private turn transcript"
+    refute prompt =~ runs_root
+    refute prompt =~ root <> "/runs"
+  end
+
   defp restore_env(key, nil), do: System.delete_env(key)
   defp restore_env(key, value), do: System.put_env(key, value)
 end

@@ -29,14 +29,14 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
       "continuationFeedback" => continuation_feedback(assistant_input),
       "existingCodexThreadId" => existing_codex_thread_id(repository, task, params),
       "workspace" => workspace_facts(repository, context),
-      "providerRules" => provider_rules()
+      "providerRules" => provider_rules(:app_server)
     }
     |> reject_nil()
   end
 
   def render_prompt(repository, task, context, params \\ %{}, opts \\ []) do
     pack = build(repository, task, context, params)
-    mode = Keyword.get(opts, :mode, :app_server)
+    mode = Keyword.get(opts, :provider) || Keyword.get(opts, :mode, :app_server)
 
     """
     You are the Coding Assistant working inside a Symphonía #{workspace_kind(mode)}.
@@ -52,7 +52,7 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
     #{pack["task"]["brief"]}
 
     #{continuation_section(pack)}
-    #{previous_review_section(pack)}
+    #{previous_review_section(pack, mode)}
     Review expectations:
     #{markdown_list(pack["reviewExpectations"], "- Review the changed files against the task acceptance criteria.")}
 
@@ -63,13 +63,29 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
     #{pack["workflow"]}
 
     Rules:
-    #{markdown_list(pack["providerRules"], "")}
+    #{markdown_list(provider_rules(mode), "")}
     """
     |> String.trim()
     |> Kernel.<>("\n")
   end
 
+  def provider_context(repository, task, context, params \\ %{}, opts \\ []) do
+    provider = Keyword.get(opts, :provider, :gemini_cli)
+
+    %{
+      "provider" => to_string(provider),
+      "renderedPrompt" => render_prompt(repository, task, context, params, provider: provider),
+      "taskKey" => task["key"],
+      "repository" => repository["key"],
+      "context" =>
+        build(repository, task, context, params)
+        |> Map.drop(["existingCodexThreadId"])
+    }
+    |> reject_nil()
+  end
+
   defp workspace_kind(:codex), do: "repository workspace"
+  defp workspace_kind(:gemini_cli), do: "OpenSandbox source-bundle workspace"
   defp workspace_kind(_mode), do: "persistent task workspace"
 
   defp workflow(context, repository) do
@@ -233,7 +249,17 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
     |> reject_nil()
   end
 
-  defp provider_rules do
+  defp provider_rules(:gemini_cli) do
+    [
+      "Make only the code changes needed for the task in this source-bundle workspace.",
+      "Do not commit, push, or open a pull request; Symphonía will import a patch, validate it locally, and create the review handoff.",
+      "Do not edit symphonia/tasks, symphonia/run-summaries, WORKFLOW.md, .symphonia, or registry files.",
+      "Do not rely on ambient Gemini memory or project configuration.",
+      "Leave validation authority to Symphonía; do not claim approval, PR readiness, or merge safety as authoritative."
+    ]
+  end
+
+  defp provider_rules(_mode) do
     [
       "Make the code changes needed for the task in this workspace.",
       "Do not commit, push, or open a pull request; Symphonía will commit and push selected work-product files.",
@@ -261,11 +287,11 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
 
   defp continuation_section(_pack), do: ""
 
-  defp previous_review_section(pack) do
+  defp previous_review_section(pack, mode) do
     [
       previous_handoff_section(pack["previousHandoff"]),
       review_notes_section(pack["reviewNotes"]),
-      thread_section(pack["existingCodexThreadId"])
+      thread_section(pack["existingCodexThreadId"], mode)
     ]
     |> Enum.reject(&blank?/1)
     |> case do
@@ -295,8 +321,9 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
   defp review_notes_section(nil), do: nil
   defp review_notes_section(notes), do: "Review notes:\n#{notes}"
 
-  defp thread_section(nil), do: nil
-  defp thread_section(thread_id), do: "Existing Codex thread ID: #{thread_id}"
+  defp thread_section(_thread_id, :gemini_cli), do: nil
+  defp thread_section(nil, _mode), do: nil
+  defp thread_section(thread_id, _mode), do: "Existing Codex thread ID: #{thread_id}"
 
   defp markdown_list([], fallback), do: fallback
 

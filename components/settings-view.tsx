@@ -8,6 +8,7 @@ import {
   type ImportSource,
 } from "@/data/mock";
 import type {
+  CodingAssistantProviderCatalog,
   CodingAssistantProviderStatus,
   GitHubConnectionState,
   RepositoryAutomationState,
@@ -470,6 +471,7 @@ interface RemoteExecutionPolicy {
   remoteExecutionAllowed: boolean;
   allowedRunnerIds?: string[];
   allowedSandboxProviders?: string[];
+  allowedCodingAssistantProviders?: string[];
   requireTrustedRunner?: boolean;
   secretScopesAllowed?: string[];
 }
@@ -580,6 +582,18 @@ async function fetchSandboxPolicy(repoKey: string): Promise<SandboxPolicy> {
     throw new Error(payload.error ?? "Could not load sandbox execution policy");
   }
   return payload.policy;
+}
+
+async function fetchProviderCatalog(repoKey: string): Promise<CodingAssistantProviderCatalog> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repoKey)}/coding-assistants/providers`,
+    { cache: "no-store" },
+  );
+  const payload = (await res.json()) as CodingAssistantProviderCatalog & { error?: string };
+  if (!res.ok || !Array.isArray(payload.providers)) {
+    throw new Error(payload.error ?? "Could not load provider catalog");
+  }
+  return payload;
 }
 
 async function setSandboxPolicy(repoKey: string, policy: SandboxPolicy): Promise<SandboxPolicy> {
@@ -914,6 +928,8 @@ function HarnessPanel({
   const [remotePolicy, setRemotePolicy] = useState<RemoteExecutionPolicy | null>(null);
   const [pendingRemotePolicy, setPendingRemotePolicy] = useState(false);
   const [sandboxPolicy, setSandboxPolicyState] = useState<SandboxPolicy | null>(null);
+  const [providerCatalog, setProviderCatalog] =
+    useState<CodingAssistantProviderCatalog | null>(null);
   const [pendingSandboxPolicy, setPendingSandboxPolicy] = useState(false);
   const [pendingSandboxSmoke, setPendingSandboxSmoke] = useState(false);
   const [secretReferences, setSecretReferences] = useState<SecretReference[]>([]);
@@ -927,16 +943,25 @@ function HarnessPanel({
         fetchHarnessStatus(),
         fetchRemoteExecutionPolicy(repoKey),
         fetchSandboxPolicy(repoKey),
+        fetchProviderCatalog(repoKey).catch(() => null),
         fetchSecretReferences(repoKey),
-      ])
-        .then(([nextStatus, nextPolicy, nextSandboxPolicy, nextSecretReferences]) => {
+      ]).then(
+        ([
+          nextStatus,
+          nextPolicy,
+          nextSandboxPolicy,
+          nextProviderCatalog,
+          nextSecretReferences,
+        ]) => {
           if (cancelled) return;
           setStatus(nextStatus);
           setRemotePolicy(nextPolicy);
           setSandboxPolicyState(nextSandboxPolicy);
+          setProviderCatalog(nextProviderCatalog);
           setSecretReferences(nextSecretReferences);
           setError(null);
-        })
+        },
+      )
         .catch((err: unknown) => {
           if (!cancelled) setError(err instanceof Error ? err.message : "Could not load Harness");
         });
@@ -1059,7 +1084,7 @@ function HarnessPanel({
     }
   };
 
-  const providers = status?.providerReadiness?.providers ?? [];
+  const providers = providerCatalog?.providers ?? status?.providerReadiness?.providers ?? [];
   const runnableProvider = providers.find((provider) => provider.id === "codex_app_server");
   const canRunCodex = runnableProvider ? canHarnessRunProvider(runnableProvider) : false;
   const decisionGroups = groupHarnessDecisions(status?.recentDecisions ?? []);
@@ -1642,6 +1667,11 @@ function ProviderContractRow({ provider }: { provider: CodingAssistantProviderSt
         ) : (
           <span className="rounded-[7px] border px-2 py-0.5 text-muted-foreground">
             Not runnable by Harness
+          </span>
+        )}
+        {provider.id === "gemini_cli" && (
+          <span className="rounded-[7px] border px-2 py-0.5 text-muted-foreground">
+            Manual OpenSandbox only
           </span>
         )}
         {visibleSupported.map((capability) => (

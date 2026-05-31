@@ -10,7 +10,14 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
   @behaviour SymphoniaService.Sandbox.Provider
 
   alias SymphoniaService.Runners.PatchBundle
-  alias SymphoniaService.Sandbox.{OpenSandboxConfig, OpenSandboxError, Session, SourceBundle}
+
+  alias SymphoniaService.Sandbox.{
+    OpenSandboxConfig,
+    OpenSandboxError,
+    ProviderRunnerScript,
+    Session,
+    SourceBundle
+  }
 
   @execd_port 44_772
 
@@ -50,7 +57,8 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
              execd,
              config["contextPath"],
              JSON.encode!(assignment["context_pack"] || %{})
-           ) do
+           ),
+         :ok <- maybe_upload_provider_runtime(execd, config) do
       {:ok,
        session
        |> Session.mark("prepared")
@@ -227,6 +235,36 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
     )
   end
 
+  defp maybe_upload_provider_runtime(execd, %{
+         "assignmentProvider" => "gemini_cli",
+         "providerApiKey" => api_key,
+         "providerEnvPath" => path
+       })
+       when is_binary(api_key) and api_key != "" do
+    with :ok <-
+           client().upload_file(
+             execd,
+             ProviderRunnerScript.path(),
+             ProviderRunnerScript.content()
+           ),
+         :ok <- client().upload_file(execd, path, JSON.encode!(%{"GEMINI_API_KEY" => api_key})),
+         {:ok, _output} <-
+           run_command(
+             execd,
+             "chmod 700 #{shell_escape(ProviderRunnerScript.path())} && chmod 600 #{shell_escape(path)}",
+             30
+           ) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_upload_provider_runtime(_execd, %{"assignmentProvider" => "gemini_cli"}),
+    do: {:error, "gemini_api_key_missing"}
+
+  defp maybe_upload_provider_runtime(_execd, _config), do: :ok
+
   defp decode_result(body, assignment) do
     with {:ok, decoded} <- JSON.decode(to_string(body)),
          result when is_map(result) <- decoded["result"] || decoded do
@@ -243,7 +281,10 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
     changed_paths = Enum.map(changed_files, &changed_file_path/1) |> Enum.reject(&(&1 == ""))
 
     result
-    |> Map.put("assignmentId", result["assignmentId"] || result["assignment_id"] || assignment["id"])
+    |> Map.put(
+      "assignmentId",
+      result["assignmentId"] || result["assignment_id"] || assignment["id"]
+    )
     |> Map.put("runId", result["runId"] || result["run_id"] || assignment["run_id"])
     |> Map.put("runnerId", result["runnerId"] || result["runner_id"] || assignment["runner_id"])
     |> Map.put("status", result["status"] || "completed")
@@ -257,14 +298,25 @@ defmodule SymphoniaService.Sandbox.OpenSandboxProvider do
     )
     |> Map.put("changedFiles", changed_files)
     |> Map.put_new("changedFilesDigest", PatchBundle.changed_files_digest(changed_paths))
-    |> Map.put_new("publicSummary", "OpenSandbox produced a reviewable patch.")
+    |> Map.put_new("publicSummary", public_summary(assignment))
     |> Map.put_new("publicTimeline", [
       %{
         "step" => "running_in_sandbox",
-        "message" => "OpenSandbox completed the Coding Assistant turn."
+        "message" => public_timeline_message(assignment)
       }
     ])
   end
+
+  defp public_summary(%{"provider" => "gemini_cli"}),
+    do: "Gemini CLI produced a reviewable patch."
+
+  defp public_summary(_assignment), do: "OpenSandbox produced a reviewable patch."
+
+  defp public_timeline_message(%{"provider" => "gemini_cli"}),
+    do: "Gemini CLI completed the sandbox turn."
+
+  defp public_timeline_message(_assignment),
+    do: "OpenSandbox completed the Coding Assistant turn."
 
   defp changed_file_path(%{"path" => path}) when is_binary(path), do: path
   defp changed_file_path(path) when is_binary(path), do: path

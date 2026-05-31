@@ -153,6 +153,7 @@ export interface RepositorySummary {
   };
   allowedRunnerIds?: string[];
   allowedSandboxProviders?: string[];
+  allowedCodingAssistantProviders?: string[];
   requireTrustedRunner?: boolean;
   secretScopesAllowed?: string[];
   last_task_number?: number;
@@ -182,6 +183,9 @@ export interface CodingAssistantProviderStatus {
   ready: boolean;
   runnable: boolean;
   runnableByHarness: boolean;
+  manualOnly?: boolean;
+  executionMode?: string;
+  workspaceProvider?: string;
   status: CodingAssistantProviderStatusValue;
   reason: string;
   capabilities: Record<string, boolean>;

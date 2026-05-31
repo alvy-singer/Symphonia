@@ -18,6 +18,8 @@ const CAPABILITY_LABELS: Record<string, string> = {
 };
 
 export function providerStatusLabel(provider: CodingAssistantProviderStatus): string {
+  if (provider.id === "gemini_cli" && provider.ready) return "Manual only";
+  if (provider.id === "gemini_cli") return "Needs setup";
   if (provider.runnableByHarness && provider.ready) return "Ready";
   if (provider.runnableByHarness) return "Needs setup";
   if (provider.status === "experimental") return "Coming later";
@@ -26,6 +28,8 @@ export function providerStatusLabel(provider: CodingAssistantProviderStatus): st
 }
 
 export function providerStatusTone(provider: CodingAssistantProviderStatus): ProviderTone {
+  if (provider.id === "gemini_cli" && provider.ready) return "ready";
+  if (provider.id === "gemini_cli") return "warning";
   if (provider.runnableByHarness && provider.ready) return "ready";
   if (provider.runnableByHarness || provider.status === "blocked") return "warning";
   return "neutral";

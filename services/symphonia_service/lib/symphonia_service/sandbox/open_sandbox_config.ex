@@ -16,6 +16,7 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
   @default_cpu "2"
   @default_memory "4Gi"
   @default_runner_command "symphonia-sandbox-runner --context /workspace/.symphonia/context-pack.json --result /workspace/.symphonia/result.json"
+  @default_gemini_runner_command "/workspace/.symphonia/bin/symphonia-provider-runner --provider gemini_cli --context /workspace/.symphonia/provider-context.json --result /workspace/.symphonia/result.json"
 
   def provider_id, do: @provider
   def label, do: @label
@@ -27,6 +28,10 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
     reference = select_api_key_reference(references, opts, repository)
     env_name = reference && reference["envName"]
     api_key = if is_binary(env_name), do: System.get_env(env_name)
+    provider_id = assignment_provider(opts)
+    provider_reference = select_provider_reference(references, provider_id)
+    provider_env_name = provider_reference && provider_reference["envName"]
+    provider_api_key = if is_binary(provider_env_name), do: System.get_env(provider_env_name)
 
     %{
       "provider" => @provider,
@@ -37,9 +42,18 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
       "apiKeyRef" => reference && reference["id"],
       "apiKeyRefConfigured" => configured_reference?(reference),
       "apiKeyEnvName" => env_name,
+      "assignmentProvider" => provider_id,
+      "providerApiKey" => provider_api_key,
+      "providerApiKeyRef" => provider_reference && provider_reference["id"],
+      "providerApiKeyRefConfigured" => configured_reference?(provider_reference),
       "image" => string_config(opts, "image", "SYMPHONIA_OPENSANDBOX_IMAGE") || @default_image,
       "ttlSeconds" =>
-        integer_config(opts, "ttlSeconds", "SYMPHONIA_OPENSANDBOX_TTL_SECONDS", @default_ttl_seconds),
+        integer_config(
+          opts,
+          "ttlSeconds",
+          "SYMPHONIA_OPENSANDBOX_TTL_SECONDS",
+          @default_ttl_seconds
+        ),
       "timeoutSeconds" =>
         integer_config(
           opts,
@@ -58,11 +72,12 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
         string_config(opts, "egressMode", "SYMPHONIA_OPENSANDBOX_EGRESS_MODE") || "restricted",
       "runnerCommand" =>
         string_config(opts, "runnerCommand", "SYMPHONIA_OPENSANDBOX_RUNNER_COMMAND") ||
-          @default_runner_command,
+          default_runner_command(provider_id),
       "resultPath" =>
         string_config(opts, "resultPath", "SYMPHONIA_OPENSANDBOX_RESULT_PATH") ||
           "/workspace/.symphonia/result.json",
-      "contextPath" => "/workspace/.symphonia/context-pack.json",
+      "contextPath" => context_path(provider_id),
+      "providerEnvPath" => "/workspace/.symphonia/provider-env.json",
       "sourceBundlePath" => "/workspace/source.tar"
     }
   end
@@ -123,6 +138,9 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
       "runnerCommand",
       "resultPath",
       "contextPath",
+      "providerEnvPath",
+      "providerApiKey",
+      "assignmentProvider",
       "sourceBundlePath"
     ])
   end
@@ -184,6 +202,12 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
     end
   end
 
+  defp select_provider_reference(references, "gemini_cli") do
+    Enum.find(references, &(&1["scope"] == "provider.gemini_cli"))
+  end
+
+  defp select_provider_reference(_references, _provider), do: nil
+
   defp configured_reference?(%{"configured" => true}), do: true
   defp configured_reference?(_reference), do: false
 
@@ -214,4 +238,18 @@ defmodule SymphoniaService.Sandbox.OpenSandboxConfig do
   end
 
   defp present?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp assignment_provider(opts) do
+    get_in(opts, ["assignment", "provider"]) ||
+      get_in(opts, [:assignment, "provider"]) ||
+      opts["providerId"] ||
+      opts["provider_id"] ||
+      "codex_app_server"
+  end
+
+  defp context_path("gemini_cli"), do: "/workspace/.symphonia/provider-context.json"
+  defp context_path(_provider), do: "/workspace/.symphonia/context-pack.json"
+
+  defp default_runner_command("gemini_cli"), do: @default_gemini_runner_command
+  defp default_runner_command(_provider), do: @default_runner_command
 end

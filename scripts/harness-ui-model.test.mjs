@@ -105,6 +105,7 @@ const {
   reviewPrimaryAction,
   runDisplayForTask,
   runOriginLabel,
+  runProviderLabel,
   runTimelineForTask,
   safeReviewBranch,
   safeSummaryPath,
@@ -790,6 +791,26 @@ test("provider helpers label runnable and future providers", () => {
   assert.equal(canHarnessRunProvider(codex), true);
   assert.equal(providerStatusLabel(codex), "Ready");
   assert.equal(providerStatusTone(codex), "ready");
+
+  const gemini = {
+    id: "gemini_cli",
+    label: "Gemini CLI",
+    configured: true,
+    ready: true,
+    runnable: true,
+    runnableByHarness: false,
+    manualOnly: true,
+    status: "ready",
+    reason: "Manual OpenSandbox runs can use this provider.",
+    capabilities: { context_pack: true, validation_pipeline: true, handoff: true },
+    missingCapabilities: [],
+  };
+
+  assert.equal(canHarnessRunProvider(gemini), false);
+  assert.equal(providerStatusLabel(gemini), "Manual only");
+  assert.equal(providerStatusTone(gemini), "ready");
+  assert.equal(runProviderLabel({ provider: "gemini_cli" }), "Gemini CLI");
+
   assert.equal(canHarnessRunProvider(claude), false);
   assert.equal(providerStatusLabel(claude), "Coming later");
   assert.deepEqual(providerMissingCapabilityLabels(claude), [

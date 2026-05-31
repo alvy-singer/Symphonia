@@ -7,7 +7,7 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
   they satisfy the full review-first execution contract.
   """
 
-  alias SymphoniaService.CodingAssistant.{AppServerProvider, CodexProvider}
+  alias SymphoniaService.CodingAssistant.{AppServerProvider, CodexProvider, GeminiCliProvider}
 
   @required_capabilities ~w(
     context_pack
@@ -27,12 +27,6 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
       "label" => "Claude Code",
       "status" => "experimental",
       "reason" => "Coming later. Not runnable by Harness V2."
-    },
-    %{
-      "id" => "gemini",
-      "label" => "Gemini",
-      "status" => "experimental",
-      "reason" => "Coming later. Missing execution adapter."
     },
     %{
       "id" => "cursor",
@@ -59,6 +53,7 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
   def providers(opts \\ []) do
     [
       provider_status(AppServerProvider, opts, harness_runnable?: true),
+      manual_provider_status(GeminiCliProvider, opts),
       legacy_provider_status(opts)
       | Enum.map(@future_providers, &future_provider_status/1)
     ]
@@ -86,6 +81,30 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
       "missingCapabilities" => missing
     }
     |> maybe_put_codex_readiness(readiness)
+  end
+
+  defp manual_provider_status(provider, opts) do
+    readiness = safe_readiness(provider, opts)
+    capabilities = normalize_capabilities(provider.capabilities())
+    missing = missing_capabilities(capabilities)
+    ready? = readiness["ready"] == true
+    configured? = readiness["configured"] == true
+
+    %{
+      "id" => provider.id(),
+      "label" => provider.label(),
+      "configured" => configured?,
+      "ready" => ready?,
+      "runnable" => ready? and missing == [],
+      "runnableByHarness" => false,
+      "manualOnly" => true,
+      "executionMode" => readiness["executionMode"] || "cloud_sandbox",
+      "workspaceProvider" => readiness["workspaceProvider"] || "opensandbox",
+      "status" => manual_status_value(ready?, configured?),
+      "reason" => manual_provider_reason(provider, readiness),
+      "capabilities" => capabilities,
+      "missingCapabilities" => missing
+    }
   end
 
   defp legacy_provider_status(opts) do
@@ -155,6 +174,10 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
   defp provider_status_value(_ready?, _configured?, true), do: "blocked"
   defp provider_status_value(_ready?, _configured?, false), do: "disabled"
 
+  defp manual_status_value(true, _configured?), do: "ready"
+  defp manual_status_value(_ready?, false), do: "not_configured"
+  defp manual_status_value(_ready?, _configured?), do: "blocked"
+
   defp provider_reason(provider, readiness, true) do
     cond do
       readiness["ready"] == true ->
@@ -176,6 +199,14 @@ defmodule SymphoniaService.CodingAssistant.ProviderCatalog do
 
   defp provider_reason(_provider, readiness, false) do
     safe_reason(readiness["reason"] || "Not runnable by Harness V2.")
+  end
+
+  defp manual_provider_reason(_provider, %{"ready" => true}) do
+    "Manual OpenSandbox runs can use this provider."
+  end
+
+  defp manual_provider_reason(provider, readiness) do
+    safe_reason(readiness["reason"] || "#{provider.label()} needs setup.")
   end
 
   defp maybe_put_codex_readiness(%{"id" => "codex_app_server"} = provider, readiness) do
