@@ -177,6 +177,7 @@ test("run progress SSE stays bounded and off the task board", async () => {
 
 test("private artifact GitHub export remains manual and PR-gated", async () => {
   const editor = await source("components/spec-artifact-editor.tsx");
+  const milkdownEditor = await source("components/private-workspace-markdown-editor.tsx");
   const previewRoute = await source(
     "app/api/repositories/[repoKey]/private-workspace/artifacts/[artifactType]/[artifactId]/export/github/preview/route.ts",
   );
@@ -189,9 +190,29 @@ test("private artifact GitHub export remains manual and PR-gated", async () => {
   assert.match(editor, /This will open a new PR updating the linked GitHub file/);
   assert.match(editor, /Preview Markdown/);
   assert.match(editor, /Open PR/);
-  assert.match(editor, /Update GitHub copy/);
+  assert.match(editor, /Export to GitHub/);
+  assert.match(editor, /PrivateWorkspaceMarkdownEditor/);
+  assert.match(editor, /repository\.configure/);
+  assert.match(editor, /readOnly=\{!canEdit\}/);
+  assert.doesNotMatch(editor, /components\/editor\/markdown-editor/);
   assert.doesNotMatch(editor, /silent sync/i);
   assert.doesNotMatch(editor, /direct default branch/i);
+
+  assert.match(milkdownEditor, /@milkdown\/kit\/preset\/gfm/);
+  assert.match(milkdownEditor, /PRIVATE_WORKSPACE_SLASH_COMMANDS/);
+  assert.match(milkdownEditor, /label="Title"/);
+  assert.match(milkdownEditor, /label="Subtitle"/);
+  assert.match(milkdownEditor, /label="Heading"/);
+  assert.match(milkdownEditor, /label="Body text"/);
+  assert.match(milkdownEditor, /label="Bold"/);
+  assert.match(milkdownEditor, /label="Italic"/);
+  assert.match(milkdownEditor, /label="Artifact link"/);
+  assert.match(milkdownEditor, /label="Bullet list"/);
+  assert.match(milkdownEditor, /label="Numbered list"/);
+  assert.match(milkdownEditor, /normalizeMilkdownMarkdown/);
+  assert.match(milkdownEditor, /Save failed/);
+  assert.match(milkdownEditor, /Read-only/);
+  assert.doesNotMatch(milkdownEditor, /@ai-sdk|useChat|provider output|transcript|threadId|turnId/i);
 
   assert.match(previewRoute, /export\/github\/preview/);
   assert.match(openPrRoute, /export\/github\/open-pr/);

@@ -4,14 +4,11 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import {
   AlertTriangle,
   CheckCircle2,
-  ExternalLink,
   GitPullRequest,
   Loader2,
-  RefreshCw,
-  Unlink,
   UploadCloud,
 } from "lucide-react";
-import { MarkdownEditor } from "@/components/editor/markdown-editor";
+import { PrivateWorkspaceMarkdownEditor } from "@/components/private-workspace-markdown-editor";
 import {
   Dialog,
   DialogContent,
@@ -181,50 +178,6 @@ async function openGitHubExportPr(
   return { artifact: data.artifact, export: data.export };
 }
 
-async function refreshGitHubExport(
-  repoKey: string,
-  artifact: SpecArtifact,
-  exportId: string,
-): Promise<{ artifact: SpecArtifact; export: WorkspaceArtifactExport }> {
-  const res = await fetch(
-    `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/artifacts/${encodeURIComponent(
-      artifact.type,
-    )}/${encodeURIComponent(artifact.id)}/exports/${encodeURIComponent(exportId)}/refresh`,
-    { method: "POST" },
-  );
-  const data = (await res.json()) as {
-    artifact?: SpecArtifact;
-    export?: WorkspaceArtifactExport;
-    error?: string;
-  };
-  if (!res.ok || !data.artifact || !data.export) {
-    throw new Error(data.error ?? "Could not refresh export pull request");
-  }
-  return { artifact: data.artifact, export: data.export };
-}
-
-async function unlinkGitHubExport(
-  repoKey: string,
-  artifact: SpecArtifact,
-  exportId: string,
-): Promise<{ artifact: SpecArtifact; export: WorkspaceArtifactExport }> {
-  const res = await fetch(
-    `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/artifacts/${encodeURIComponent(
-      artifact.type,
-    )}/${encodeURIComponent(artifact.id)}/exports/${encodeURIComponent(exportId)}/unlink`,
-    { method: "POST" },
-  );
-  const data = (await res.json()) as {
-    artifact?: SpecArtifact;
-    export?: WorkspaceArtifactExport;
-    error?: string;
-  };
-  if (!res.ok || !data.artifact || !data.export) {
-    throw new Error(data.error ?? "Could not unlink export");
-  }
-  return { artifact: data.artifact, export: data.export };
-}
-
 async function fetchRepositoryAccess(repoKey: string): Promise<Record<string, boolean>> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/access`, {
     cache: "no-store",
@@ -249,9 +202,8 @@ export function SpecArtifactEditor({
   const [error, setError] = useState<string | null>(null);
   const [statusPending, setStatusPending] = useState<SpecArtifactStatus | null>(null);
   const [exports, setExports] = useState<WorkspaceArtifactExport[]>([]);
+  const [canEdit, setCanEdit] = useState(false);
   const [canExport, setCanExport] = useState(false);
-  const [canRefreshExport, setCanRefreshExport] = useState(false);
-  const [exportPending, setExportPending] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
 
   useEffect(() => {
@@ -280,13 +232,13 @@ export function SpecArtifactEditor({
     fetchRepositoryAccess(repoKey)
       .then((nextPermissions) => {
         if (cancelled) return;
+        setCanEdit(Boolean(nextPermissions["repository.configure"]));
         setCanExport(Boolean(nextPermissions["private_workspace.export"]));
-        setCanRefreshExport(Boolean(nextPermissions["pull_request.refresh"]));
       })
       .catch(() => {
         if (!cancelled) {
+          setCanEdit(false);
           setCanExport(false);
-          setCanRefreshExport(false);
         }
       });
     return () => {
@@ -322,38 +274,8 @@ export function SpecArtifactEditor({
   }, [artifact]);
 
   const currentExport = useMemo(() => latestExport(exports), [exports]);
-
-  const refreshExport = useCallback(async () => {
-    if (!artifact || !currentExport?.id) return;
-    setExportPending(true);
-    setError(null);
-    try {
-      const result = await refreshGitHubExport(repoKey, artifact, currentExport.id);
-      setArtifact(result.artifact);
-      setExports((items) => replaceExport(items, result.export));
-      window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not refresh export pull request");
-    } finally {
-      setExportPending(false);
-    }
-  }, [artifact, currentExport, repoKey]);
-
-  const unlinkExport = useCallback(async () => {
-    if (!artifact || !currentExport?.id) return;
-    setExportPending(true);
-    setError(null);
-    try {
-      const result = await unlinkGitHubExport(repoKey, artifact, currentExport.id);
-      setArtifact(result.artifact);
-      setExports((items) => replaceExport(items, result.export));
-      window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not unlink export");
-    } finally {
-      setExportPending(false);
-    }
-  }, [artifact, currentExport, repoKey]);
+  const hasOpenExportPr = currentExport?.pullRequestState === "open";
+  const exportDisabled = !canExport || artifact?.exportStatus === "pr_open" || hasOpenExportPr;
 
   const updateStatus = useCallback(
     async (nextStatus: SpecArtifactStatus) => {
@@ -397,37 +319,35 @@ export function SpecArtifactEditor({
 
   return (
     <>
-      <MarkdownEditor
+      <PrivateWorkspaceMarkdownEditor
         page={editorPage}
         onPersist={persistPatch}
         onPersistError={(err) => {
           setError(err instanceof Error ? err.message : "Could not save document");
         }}
-        showPageActions
-        stateRevision={artifact.status}
+        readOnly={!canEdit}
+        stateRevision={`${artifact.status}:${artifact.latestRevisionId ?? ""}`}
         actionsMenuContent={
           <StatusMenu
             status={artifact.status}
             pending={statusPending}
+            disabled={!canEdit}
             onSelect={(nextStatus) => void updateStatus(nextStatus)}
           />
         }
         bodyPlaceholder={`Enter ${TYPE_LABELS[artifact.type].toLowerCase()} notes or type '/' for commands`}
-        belowBodySlot={
-          <div className="space-y-3">
-            <ExportPanel
-              artifact={artifact}
-              currentExport={currentExport}
-              canExport={canExport}
-              canRefresh={canRefreshExport}
-              pending={exportPending}
-              onExport={() => void prepareExport()}
-              onRefresh={() => void refreshExport()}
-              onUnlink={() => void unlinkExport()}
-            />
-            {error ? <Notice tone="warn">{error}</Notice> : null}
-          </div>
+        toolbarAction={
+          <button
+            type="button"
+            onClick={() => void prepareExport()}
+            disabled={exportDisabled}
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border bg-background px-2.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <GitPullRequest className="h-3.5 w-3.5" />
+            Export to GitHub
+          </button>
         }
+        belowBodySlot={error ? <Notice tone="warn">{error}</Notice> : null}
       />
       <ExportModal
         repoKey={repoKey}
@@ -443,90 +363,6 @@ export function SpecArtifactEditor({
         }}
       />
     </>
-  );
-}
-
-function ExportPanel({
-  artifact,
-  currentExport,
-  canExport,
-  canRefresh,
-  pending,
-  onExport,
-  onRefresh,
-  onUnlink,
-}: {
-  artifact: SpecArtifact;
-  currentExport?: WorkspaceArtifactExport;
-  canExport: boolean;
-  canRefresh: boolean;
-  pending: boolean;
-  onExport: () => void;
-  onRefresh: () => void;
-  onUnlink: () => void;
-}) {
-  const primaryLabel = exportActionLabel(artifact.exportStatus);
-  const prUrl = artifact.pullRequestUrl ?? artifact.githubPrUrl ?? currentExport?.pullRequestUrl;
-  const hasOpenExportPr = currentExport?.pullRequestState === "open";
-
-  return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs">
-      <div className="min-w-0">
-        <p className="font-medium">Export status: {exportStatusLabel(artifact.exportStatus)}</p>
-        <p className="mt-1 truncate text-muted-foreground">
-          {artifact.exportTargetPath ??
-            currentExport?.targetPath ??
-            artifact.legacyRepoPath ??
-            "Private artifact; no live repository sync."}
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {prUrl && (
-          <a
-            href={prUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-8 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] font-medium hover:bg-accent"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            View PR
-          </a>
-        )}
-        {canRefresh && currentExport?.id && (
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={pending}
-            className="inline-flex h-8 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Refresh
-          </button>
-        )}
-        {canExport && currentExport?.id && artifact.exportStatus !== "unlinked" && (
-          <button
-            type="button"
-            onClick={onUnlink}
-            disabled={pending}
-            className="inline-flex h-8 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Unlink className="h-3.5 w-3.5" />
-            Unlink
-          </button>
-        )}
-        {canExport && artifact.exportStatus !== "pr_open" && !hasOpenExportPr && (
-          <button
-            type="button"
-            onClick={onExport}
-            disabled={pending}
-            className="inline-flex h-8 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <GitPullRequest className="h-3.5 w-3.5" />
-            {primaryLabel}
-          </button>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -738,10 +574,12 @@ function ExportModal({
 function StatusMenu({
   status,
   pending,
+  disabled,
   onSelect,
 }: {
   status: SpecArtifactStatus;
   pending: SpecArtifactStatus | null;
+  disabled?: boolean;
   onSelect: (status: SpecArtifactStatus) => void;
 }) {
   return (
@@ -754,7 +592,7 @@ function StatusMenu({
           key={option}
           type="button"
           onClick={() => onSelect(option)}
-          disabled={pending !== null || option === status}
+          disabled={disabled || pending !== null || option === status}
           className={cn(
             "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50",
             option === status ? "text-foreground" : "text-muted-foreground",
@@ -837,37 +675,6 @@ function defaultPublishedStatus(type: SpecArtifactType): SpecArtifactStatus {
     case "milestone":
     case "decision":
       return "approved";
-  }
-}
-
-function exportStatusLabel(status: SpecArtifact["exportStatus"]): string {
-  switch (status) {
-    case "linked":
-      return "Linked to GitHub";
-    case "changed_since_export":
-      return "Changed since export";
-    case "pr_open":
-      return "PR open";
-    case "conflict":
-      return "Conflict";
-    case "unlinked":
-      return "Unlinked";
-    case "never_exported":
-    default:
-      return "Never exported";
-  }
-}
-
-function exportActionLabel(status: SpecArtifact["exportStatus"]): string {
-  switch (status) {
-    case "changed_since_export":
-    case "linked":
-      return "Update GitHub copy";
-    case "conflict":
-    case "unlinked":
-    case "never_exported":
-    default:
-      return "Export to GitHub";
   }
 }
 

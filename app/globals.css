@@ -1,5 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@milkdown/kit/prose/view/style/prosemirror.css";
+@import "@milkdown/kit/prose/gapcursor/style/gapcursor.css";
+@import "@milkdown/kit/prose/tables/style/tables.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -149,5 +152,120 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+  }
+}
+
+@layer components {
+  .private-workspace-milkdown .ProseMirror {
+    min-height: 42svh;
+    outline: none;
+    color: var(--color-foreground);
+    font-size: 0.95rem;
+    line-height: 1.7;
+  }
+
+  .private-workspace-milkdown .ProseMirror > * + * {
+    margin-top: 0.9rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror p {
+    min-height: 1.45rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror h1,
+  .private-workspace-milkdown .ProseMirror h2,
+  .private-workspace-milkdown .ProseMirror h3 {
+    font-weight: 650;
+    line-height: 1.25;
+  }
+
+  .private-workspace-milkdown .ProseMirror h1 {
+    font-size: 1.55rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror h2 {
+    font-size: 1.25rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror h3 {
+    font-size: 1.05rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror p.is-editor-empty:first-child::before {
+    color: var(--color-muted-foreground);
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .private-workspace-milkdown .ProseMirror ul,
+  .private-workspace-milkdown .ProseMirror ol {
+    padding-left: 1.35rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror ul {
+    list-style: disc;
+  }
+
+  .private-workspace-milkdown .ProseMirror ol {
+    list-style: decimal;
+  }
+
+  .private-workspace-milkdown .ProseMirror li + li {
+    margin-top: 0.2rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror blockquote {
+    border-left: 2px solid var(--color-brand-accent-text);
+    color: var(--color-muted-foreground);
+    padding-left: 0.85rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror code {
+    border: 1px solid var(--color-border);
+    border-radius: 0.25rem;
+    background: color-mix(in oklch, var(--color-muted) 70%, transparent);
+    padding: 0.1rem 0.25rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.86em;
+  }
+
+  .private-workspace-milkdown .ProseMirror pre {
+    overflow-x: auto;
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+    background: color-mix(in oklch, var(--color-muted) 58%, transparent);
+    padding: 0.85rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror pre code {
+    border: 0;
+    background: transparent;
+    padding: 0;
+  }
+
+  .private-workspace-milkdown .ProseMirror table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+
+  .private-workspace-milkdown .ProseMirror th,
+  .private-workspace-milkdown .ProseMirror td {
+    border: 1px solid var(--color-border);
+    padding: 0.45rem 0.55rem;
+    vertical-align: top;
+  }
+
+  .private-workspace-milkdown .ProseMirror th {
+    background: color-mix(in oklch, var(--color-muted) 62%, transparent);
+    font-weight: 600;
+  }
+
+  .private-workspace-milkdown .ProseMirror a {
+    color: var(--color-brand-accent-text);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 }

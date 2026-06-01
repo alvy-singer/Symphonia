@@ -68,6 +68,15 @@ defmodule SymphoniaService.PrivateWorkspaceTest do
     assert updated["latestRevisionId"] != first_revision
     assert length(updated["metadata"]["revisions"]) == 2
 
+    metadata_only =
+      PrivateWorkspace.update_artifact(repository, "milestone", artifact["id"], %{
+        "metadata" => %{"title" => "Renamed private milestone"}
+      })
+
+    assert metadata_only["title"] == "Renamed private milestone"
+    assert metadata_only["latestRevisionId"] == updated["latestRevisionId"]
+    assert length(metadata_only["metadata"]["revisions"]) == 2
+
     assert PrivateWorkspace.read_artifact(repository, "milestone", artifact["id"])["body"] =~
              "Updated privately."
   end
