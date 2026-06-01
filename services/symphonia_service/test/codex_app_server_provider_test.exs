@@ -6,7 +6,14 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
   alias SymphoniaService.GitHub.InstallationStore
   alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
   alias SymphoniaService.Runner.LocalGitWorktreeProvider
-  alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
+
+  alias SymphoniaService.{
+    CodingAssistant,
+    PrivateWorkspace,
+    RepositoryRegistry,
+    TaskStore,
+    Workspace
+  }
 
   defmodule StubClient do
     def create_installation_token(_jwt, _installation_id) do
@@ -188,11 +195,13 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert run["workspace_path"] == Path.join([workspaces_root, "sym", "sym-1"])
     assert run["codex_thread_id"] == "thread-fake"
     assert run["turn_id"] == "turn-fake"
-    assert run["curated_summary_path"] == "symphonia/run-summaries/sym-1-codex-handoff.md"
+    assert run["curated_summary_id"] == "sym-1-codex-handoff"
+    assert run["curated_summary_path"] == "private-workspace/run_summary/sym-1-codex-handoff"
     assert run["provider_output"]["app_server_events"] != []
     assert task["handoff"]["curatedSummaryPath"] == run["curated_summary_path"]
+    assert task["handoff"]["curatedSummaryId"] == run["curated_summary_id"]
     assert "app/app-server-output.txt" in task["handoff"]["filesChanged"]
-    assert run["curated_summary_path"] in task["handoff"]["filesChanged"]
+    refute run["curated_summary_path"] in task["handoff"]["filesChanged"]
     assert task["handoff"]["summary"] == "Fake App Server changed app/app-server-output.txt."
     assert task["handoff"]["headBranch"] == "symphonia/task/sym-1"
     assert task["handoff"]["baseBranch"] == "main"
@@ -219,22 +228,25 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
       ])
 
     assert branch_files =~ "app/app-server-output.txt"
-    assert branch_files =~ run["curated_summary_path"]
-    refute branch_files =~ "symphonia/tasks/SYM-1.md"
+    refute branch_files =~ run["curated_summary_path"]
 
     summary =
-      git_output!([
-        "--git-dir",
-        remote_path,
-        "show",
-        "refs/heads/symphonia/task/sym-1:#{run["curated_summary_path"]}"
-      ])
+      PrivateWorkspace.read_artifact(
+        private_repository(repository, registry_path),
+        "run_summary",
+        run["curated_summary_id"]
+      )
 
-    assert summary =~ "Raw app-server events remain in the local Symphonía run store."
-    assert summary =~ "## Validation Evidence"
-    refute summary =~ "turn/completed"
-    refute summary =~ "thread-fake"
-    refute summary =~ "turn-fake"
+    summary_body = summary["body"]
+
+    assert summary_body =~ "Machine validation: Not run"
+    refute branch_files =~ "symphonia/tasks/SYM-1.md"
+
+    assert summary_body =~ "Raw app-server events remain in the local Symphonía run store."
+    assert summary_body =~ "## Validation Evidence"
+    refute summary_body =~ "turn/completed"
+    refute summary_body =~ "thread-fake"
+    refute summary_body =~ "turn-fake"
 
     requests = JSON.decode!(File.read!(requests_file))
     assert Enum.any?(requests, &(&1["method"] == "thread/start"))
@@ -607,15 +619,14 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
       ])
 
     assert branch_files =~ "app/app-server-output.txt"
-    assert branch_files =~ run["curated_summary_path"]
+    refute branch_files =~ run["curated_summary_path"]
 
     summary =
-      git_output!([
-        "--git-dir",
-        remote_path,
-        "show",
-        "refs/heads/symphonia/task/sym-1:#{run["curated_summary_path"]}"
-      ])
+      PrivateWorkspace.read_artifact(
+        private_repository(repository, registry_path),
+        "run_summary",
+        run["curated_summary_id"]
+      )["body"]
 
     refute summary =~ "sandbox_"
     refute summary =~ run["workspace_path"]
@@ -656,7 +667,6 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
   test "Codex App Server run attaches passing workflow validation evidence", %{
     registry_path: registry_path,
     repository: repository,
-    remote_path: remote_path,
     runs_root: runs_root
   } do
     commit_workflow_validation!(
@@ -684,12 +694,11 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert private_output =~ "APP_TOKEN=secret:/Users/example/private"
 
     summary =
-      git_output!([
-        "--git-dir",
-        remote_path,
-        "show",
-        "refs/heads/symphonia/task/sym-1:#{run["curated_summary_path"]}"
-      ])
+      PrivateWorkspace.read_artifact(
+        private_repository(repository, registry_path),
+        "run_summary",
+        run["curated_summary_id"]
+      )["body"]
 
     assert summary =~ "Smoke validation: Passed - Smoke validation passed."
     refute summary =~ "APP_TOKEN=secret"
@@ -699,7 +708,6 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
   test "failed required validation keeps handoff in review with warning evidence", %{
     registry_path: registry_path,
     repository: repository,
-    remote_path: remote_path,
     runs_root: runs_root
   } do
     commit_workflow_validation!(
@@ -728,12 +736,11 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
              "APP_SECRET=hidden:/Users/example/private"
 
     summary =
-      git_output!([
-        "--git-dir",
-        remote_path,
-        "show",
-        "refs/heads/symphonia/task/sym-1:#{run["curated_summary_path"]}"
-      ])
+      PrivateWorkspace.read_artifact(
+        private_repository(repository, registry_path),
+        "run_summary",
+        run["curated_summary_id"]
+      )["body"]
 
     assert summary =~
              "Required tests: Failed - Required tests failed. Review the private run output locally."
@@ -1397,6 +1404,10 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     key = :public_key.generate_key({:rsa, 1024, 65_537})
     entry = :public_key.pem_entry_encode(:RSAPrivateKey, key)
     File.write!(path, :public_key.pem_encode([entry]))
+  end
+
+  defp private_repository(repository, registry_path) do
+    Map.put(repository, "_registry_path", registry_path)
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

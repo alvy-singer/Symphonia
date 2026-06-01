@@ -84,7 +84,9 @@ export interface CodingAssistantRun {
   turnId?: string;
   eligibilityReason?: string;
   reviewBranch?: string;
+  curatedSummaryId?: string;
   curatedSummaryPath?: string;
+  evidenceIds?: string[];
   retryAt?: string;
   failureClass?: string;
   attempt?: number;
@@ -105,7 +107,9 @@ export interface CodingAssistantRunEvent {
   displayStep?: string;
   displayMessage?: string;
   reviewBranch?: string;
+  curatedSummaryId?: string;
   curatedSummaryPath?: string;
+  evidenceIds?: string[];
   updatedAt?: string;
 }
 
@@ -115,7 +119,9 @@ export interface CodingAssistantHandoff {
   nextReviewAction?: string;
   headBranch?: string;
   baseBranch?: string;
+  curatedSummaryId?: string;
   curatedSummaryPath?: string;
+  evidenceIds?: string[];
   validationEvidence?: ValidationEvidence[];
 }
 

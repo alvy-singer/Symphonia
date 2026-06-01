@@ -5,7 +5,7 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
 
   @behaviour SymphoniaService.CodingAssistant.Provider
 
-  alias SymphoniaService.TaskStore
+  alias SymphoniaService.{PrivateWorkspace, TaskStore}
 
   alias SymphoniaService.CodingAssistant.{
     AppServerClient,
@@ -88,18 +88,19 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
                    invoke_app_server(repository, task["key"], run, context.repo_path, prompt),
                  {:ok, changes} <- reviewable_changes(run, context, review_context),
                  :ok <- ensure_committable_changes(changes),
-                 {:ok, validation} <- run_validation(run, review_context.repo_path, task),
-                 {:ok, summary_path} <-
+                 {:ok, validation} <-
+                   run_validation(repository, run, review_context.repo_path, task),
+                 {:ok, summary} <-
                    write_summary(
+                     repository,
                      run,
-                     review_context.repo_path,
                      task,
                      changes,
                      output,
                      validation["public_evidence"]
                    ),
-                 :ok <- commit_and_push(run, review_context, task, changes, summary_path) do
-              files_changed = Enum.sort(changes["committable"] ++ [summary_path])
+                 :ok <- commit_and_push(run, review_context, task, changes) do
+              files_changed = Enum.sort(changes["committable"])
 
               handoff =
                 HandoffBuilder.build_from_changes(
@@ -111,7 +112,9 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
                 )
                 |> Map.put("head_branch", review_context.head_branch)
                 |> Map.put("base_branch", review_context.base_branch)
-                |> Map.put("curated_summary_path", summary_path)
+                |> Map.put("curated_summary_id", summary["id"])
+                |> Map.put("curated_summary_path", private_summary_ref(summary))
+                |> Map.put("evidence_ids", validation["evidence_ids"])
                 |> maybe_failed_validation_next_action(validation["results"])
 
               {:ok, handoff}
@@ -252,7 +255,9 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
       "eligibility_reason" => run["eligibility_reason"],
       "workspace_provider" => run["workspace_provider"],
       "review_branch" => run["review_branch"],
+      "curated_summary_id" => run["curated_summary_id"],
       "curated_summary_path" => run["curated_summary_path"],
+      "evidence_ids" => run["evidence_ids"],
       "started_at" => run["started_at"],
       "completed_at" => run["completed_at"]
     }
@@ -301,12 +306,18 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
 
   defp ensure_committable_changes(_changes), do: :ok
 
-  defp run_validation(run, repo_path, task) do
+  defp run_validation(repository, run, repo_path, task) do
     RunStore.mark_step(run, "Running validation")
 
     policy = Policy.load(repo_path, task)
     {:ok, results} = Runner.run(repo_path, policy)
     public_evidence = Evidence.public(results)
+
+    evidence_records =
+      PrivateWorkspace.record_validation_evidence(repository, run, public_evidence)
+
+    evidence_ids = Enum.map(evidence_records, & &1["id"])
+    RunStore.update_metadata(run, %{"evidence_ids" => evidence_ids})
 
     RunStore.record_provider_output(run, %{
       "validation" => %{
@@ -319,16 +330,17 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
      %{
        "policy" => policy,
        "results" => results,
-       "public_evidence" => public_evidence
+       "public_evidence" => public_evidence,
+       "evidence_ids" => evidence_ids
      }}
   rescue
     error -> {:error, Exception.message(error)}
   end
 
-  defp write_summary(run, repo_path, task, changes, output, validation_evidence) do
-    summary_path =
-      CuratedSummary.write!(
-        repo_path,
+  defp write_summary(repository, run, task, changes, output, validation_evidence) do
+    summary =
+      CuratedSummary.write_private!(
+        repository,
         task,
         RunStore.get(run["id"]) || run,
         changes["committable"],
@@ -336,8 +348,12 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
         validation_evidence
       )
 
-    RunStore.update_metadata(run, %{"curated_summary_path" => summary_path})
-    {:ok, summary_path}
+    RunStore.update_metadata(run, %{
+      "curated_summary_id" => summary["id"],
+      "curated_summary_path" => private_summary_ref(summary)
+    })
+
+    {:ok, summary}
   rescue
     error -> {:error, Exception.message(error)}
   end
@@ -354,13 +370,13 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
     end
   end
 
-  defp commit_and_push(run, context, task, changes, summary_path) do
+  defp commit_and_push(run, context, task, changes) do
     RunStore.mark_step(run, "Creating review branch")
 
     BranchManager.commit_files!(
       context,
       task,
-      Enum.sort(changes["committable"] ++ [summary_path])
+      Enum.sort(changes["committable"])
     )
 
     BranchManager.push_task_branch!(context)
@@ -368,6 +384,8 @@ defmodule SymphoniaService.CodingAssistant.AppServerProvider do
   rescue
     error -> {:error, Exception.message(error)}
   end
+
+  defp private_summary_ref(summary), do: "private-workspace/run_summary/#{summary["id"]}"
 
   defp app_server_args do
     case System.get_env("SYMPHONIA_CODEX_APP_SERVER_ARGS") do

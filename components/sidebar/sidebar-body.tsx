@@ -34,10 +34,6 @@ interface Props {
 
 const WORKSPACE_DOCUMENT_CREATE_TYPES: SpecArtifactType[] = [
   "milestone",
-  "discussion",
-  "requirements",
-  "task_proposal",
-  "task_brief",
   "plan",
   "decision",
 ];
@@ -53,6 +49,7 @@ const WORKSPACE_DOCUMENT_LABELS: Record<SpecArtifactType, string> = {
   task_proposal: "Task proposal",
   task_brief: "Task brief",
   decision: "Decision",
+  run_summary: "Run summary",
 };
 
 /**
@@ -94,13 +91,13 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
   }, []);
 
   const loadWorkspaceDocumentState = useCallback(async () => {
-    const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace`, {
+    const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/private-workspace`, {
       cache: "no-store",
     });
     const payload = (await res.json()) as {
-      specWorkspace?: { state?: { initialized?: boolean } };
+      privateWorkspace?: { state?: { initialized?: boolean } };
     };
-    return Boolean(res.ok && payload.specWorkspace?.state?.initialized);
+    return Boolean(res.ok && payload.privateWorkspace?.state?.initialized);
   }, [repoKey]);
 
   useEffect(() => {
@@ -137,7 +134,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
     setWorkspaceDocError(null);
     try {
       const res = await fetch(
-        `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/artifacts/${encodeURIComponent(
+        `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/artifacts/${encodeURIComponent(
           type,
         )}`,
         {

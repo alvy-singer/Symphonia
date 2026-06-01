@@ -96,7 +96,7 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
   end
 
   defp run_once(state) do
-    repository = state["repository"]
+    repository = private_repository(state["repository"], state["registry_path"])
     task_key = state["task_key"]
     run = RunStore.mark_step(state["run"], "Running Coding Assistant")
     task = TaskStore.get_task(repository, task_key)
@@ -114,6 +114,12 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
         handle_provider_error(state, run, reason)
     end
   end
+
+  defp private_repository(repository, registry_path) when is_binary(registry_path) do
+    Map.put(repository, "_registry_path", registry_path)
+  end
+
+  defp private_repository(repository, _registry_path), do: repository
 
   defp handle_provider_error(%{"kind" => "daemon_assignment"} = state, run, reason) do
     public_message = failure_explanation_for_state(state, reason)
@@ -333,7 +339,9 @@ defmodule SymphoniaService.CodingAssistant.RunWorker do
       "workspace_provider" => run["workspace_provider"],
       "cleanup_warning" => run["cleanup_warning"],
       "review_branch" => run["review_branch"],
+      "curated_summary_id" => run["curated_summary_id"],
       "curated_summary_path" => run["curated_summary_path"],
+      "evidence_ids" => run["evidence_ids"],
       "retry_at" => run["retry_at"],
       "failure_class" => run["failure_class"],
       "attempt" => run["attempt"],

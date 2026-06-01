@@ -11,7 +11,14 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
   alias SymphoniaService.Sandbox.Policy, as: SandboxPolicy
   alias SymphoniaService.Sandbox.Registry, as: SandboxRegistry
   alias SymphoniaService.Sandbox.SourceBundle
-  alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
+
+  alias SymphoniaService.{
+    CodingAssistant,
+    PrivateWorkspace,
+    RepositoryRegistry,
+    TaskStore,
+    Workspace
+  }
 
   defmodule StubClient do
     def create_installation_token(_jwt, _installation_id) do
@@ -291,7 +298,16 @@ defmodule SymphoniaService.CloudSandboxProviderTest do
       ])
 
     assert branch_files =~ "lib/cloud_sandbox_output.ex"
-    assert branch_files =~ completed_task["handoff"]["curatedSummaryPath"]
+    refute branch_files =~ completed_task["handoff"]["curatedSummaryPath"]
+
+    summary =
+      PrivateWorkspace.read_artifact(
+        Map.put(repository, "_registry_path", registry_path),
+        "run_summary",
+        completed_task["handoff"]["curatedSummaryId"]
+      )
+
+    assert summary["body"] =~ "Sandbox produced a reviewable patch."
 
     events = wait_for_event_steps(events_path, ["create", "prepare", "run", "release"])
     assert Enum.map(events, & &1["step"]) == ["create", "prepare", "run", "release"]

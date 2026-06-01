@@ -72,7 +72,8 @@ export interface AuditEvent {
       | "harness"
       | "workflow"
       | "runner"
-      | "secret_reference";
+      | "secret_reference"
+      | "private_workspace";
     id?: string;
   };
   result: "allowed" | "denied" | "completed" | "failed";

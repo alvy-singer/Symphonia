@@ -301,7 +301,9 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
       actor,
       "provider.gemini_cli_result_received",
       assignment,
-      "completed", changedFileCount: length(List.wrap(assignment["changed_files"])))
+      "completed",
+      changedFileCount: length(List.wrap(assignment["changed_files"]))
+    )
   end
 
   defp audit_provider_result(_registry_path, _repository, _actor, _assignment), do: :ok
@@ -319,7 +321,9 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
       actor,
       "provider.gemini_cli_run_failed",
       assignment,
-      "failed", reasonCode: reason)
+      "failed",
+      reasonCode: reason
+    )
   end
 
   defp audit_provider_failed(_registry_path, _repository, _actor, _assignment, _reason), do: :ok
@@ -363,7 +367,9 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
             "assignment_id" => run["assignment_id"],
             "workspace_provider" => run["workspace_provider"],
             "review_branch" => run["review_branch"],
+            "curated_summary_id" => run["curated_summary_id"],
             "curated_summary_path" => run["curated_summary_path"],
+            "evidence_ids" => run["evidence_ids"],
             "cleanup_warning" => run["cleanup_warning"],
             "failure_class" => run["failure_class"],
             "started_at" => run["started_at"],

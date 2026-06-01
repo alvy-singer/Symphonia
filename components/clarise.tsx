@@ -327,7 +327,7 @@ async function createSpecArtifact(
 ): Promise<{ type: string; id: string }> {
   if (action === "starter_codebase_map") {
     const res = await fetch(
-      `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/initialize`,
+      `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/initialize`,
       { method: "POST" },
     );
     const payload = (await res.json()) as { error?: string };
@@ -335,9 +335,9 @@ async function createSpecArtifact(
     return { type: "codebase_map", id: "codebase-map" };
   }
 
-  const endpoint = action === "starter_milestone" ? "milestones" : "decisions";
+  const artifactType = action === "starter_milestone" ? "milestone" : "decision";
   const res = await fetch(
-    `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/${endpoint}`,
+    `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/artifacts/${artifactType}`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },

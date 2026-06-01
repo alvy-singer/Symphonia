@@ -18,7 +18,15 @@ defmodule SymphoniaService.Readiness.SetupActions do
   end
 
   def initialize_spec_workspace(repository, opts \\ []) do
+    repository = with_registry_path(repository, opts)
     SpecWorkspace.initialize(repository)
     RepositoryReadiness.get(repository, opts)
+  end
+
+  defp with_registry_path(repository, opts) do
+    case Keyword.get(opts, :registry_path) do
+      value when is_binary(value) -> Map.put(repository, "_registry_path", value)
+      _ -> repository
+    end
   end
 end

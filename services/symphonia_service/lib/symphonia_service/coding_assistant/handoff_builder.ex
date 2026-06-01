@@ -90,7 +90,9 @@ defmodule SymphoniaService.CodingAssistant.HandoffBuilder do
             "workspace_provider" => run["workspace_provider"],
             "cleanup_warning" => run["cleanup_warning"],
             "review_branch" => run["review_branch"],
+            "curated_summary_id" => run["curated_summary_id"],
             "curated_summary_path" => run["curated_summary_path"],
+            "evidence_ids" => run["evidence_ids"],
             "started_at" => run["started_at"],
             "completed_at" => run["completed_at"]
           }

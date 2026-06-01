@@ -12,8 +12,10 @@ import {
   Milestone,
   Plus,
   ShieldCheck,
+  UploadCloud,
 } from "lucide-react";
 import type {
+  LegacyWorkspaceArtifact,
   SpecArtifactSummary,
   SpecArtifactType,
   SpecWorkspacePayload,
@@ -33,6 +35,7 @@ const TYPE_LABELS: Record<SpecArtifactType, string> = {
   task_proposal: "Task proposal",
   task_brief: "Task brief",
   decision: "Decision",
+  run_summary: "Run summary",
 };
 
 const SECTION_ICONS: Record<string, typeof FileText> = {
@@ -40,6 +43,7 @@ const SECTION_ICONS: Record<string, typeof FileText> = {
   Requirements: ListChecks,
   Plans: ShieldCheck,
   Decisions: Landmark,
+  "Run summaries": FileText,
   "Task briefs": FileText,
 };
 
@@ -49,6 +53,7 @@ export function SpecWorkspaceIndex({ repoKey }: { repoKey: string }) {
   const [workflow, setWorkflow] = useState<WorkflowFile | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
+  const [importPending, setImportPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadWorkspace = useCallback(async () => {
@@ -95,21 +100,43 @@ export function SpecWorkspaceIndex({ repoKey }: { repoKey: string }) {
     setError(null);
     try {
       const res = await fetch(
-        `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/initialize`,
+        `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/initialize`,
         { method: "POST" },
       );
       const payload = (await res.json()) as {
-        specWorkspace?: SpecWorkspacePayload;
+        privateWorkspace?: SpecWorkspacePayload;
         error?: string;
       };
-      if (!res.ok || !payload.specWorkspace) {
+      if (!res.ok || !payload.privateWorkspace) {
         throw new Error(payload.error ?? "Could not set up workspace");
       }
-      setWorkspace(payload.specWorkspace);
+      setWorkspace(payload.privateWorkspace);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not set up workspace");
     } finally {
       setPending(false);
+    }
+  };
+
+  const importLegacy = async () => {
+    setImportPending(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/legacy/import`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ all: true }),
+        },
+      );
+      const payload = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "Could not import legacy artifacts");
+      await loadWorkspace();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not import legacy artifacts");
+    } finally {
+      setImportPending(false);
     }
   };
 
@@ -154,6 +181,11 @@ export function SpecWorkspaceIndex({ repoKey }: { repoKey: string }) {
         {!workspace?.state.initialized ? (
           <div className="space-y-7">
             <RepositoryRulesSection repoSlug={repoSlug} workflow={workflow} />
+            <LegacyImportSection
+              legacy={workspace?.legacy ?? []}
+              pending={importPending}
+              onImport={importLegacy}
+            />
             <div className="rounded-[10px] border bg-card p-6 shadow-[var(--elevation-card)]">
               <h2 className="text-xl font-semibold">Set up private workspace</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
@@ -172,6 +204,11 @@ export function SpecWorkspaceIndex({ repoKey }: { repoKey: string }) {
         ) : (
           <div className="space-y-7">
             <RepositoryRulesSection repoSlug={repoSlug} workflow={workflow} />
+            <LegacyImportSection
+              legacy={workspace.legacy ?? []}
+              pending={importPending}
+              onImport={importLegacy}
+            />
             {workspace.sections.map((section) => (
               <ArtifactSection
                 key={section.label}
@@ -262,17 +299,17 @@ function ArtifactSection({
 }
 
 async function fetchSpecWorkspace(repoKey: string): Promise<SpecWorkspacePayload> {
-  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace`, {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/private-workspace`, {
     cache: "no-store",
   });
   const payload = (await res.json()) as {
-    specWorkspace?: SpecWorkspacePayload;
+    privateWorkspace?: SpecWorkspacePayload;
     error?: string;
   };
-  if (!res.ok || !payload.specWorkspace) {
+  if (!res.ok || !payload.privateWorkspace) {
     throw new Error(payload.error ?? "Could not load workspace");
   }
-  return payload.specWorkspace;
+  return payload.privateWorkspace;
 }
 
 async function fetchWorkflow(repoKey: string): Promise<WorkflowFile> {
@@ -284,6 +321,54 @@ async function fetchWorkflow(repoKey: string): Promise<WorkflowFile> {
     throw new Error(payload.error ?? "Could not load repository rules");
   }
   return payload.workflow;
+}
+
+function LegacyImportSection({
+  legacy,
+  pending,
+  onImport,
+}: {
+  legacy: LegacyWorkspaceArtifact[];
+  pending: boolean;
+  onImport: () => void;
+}) {
+  const importable = legacy.filter((item) => !item.imported);
+  if (legacy.length === 0) return null;
+
+  return (
+    <section className="rounded-[8px] border border-dashed px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[14px] font-semibold">Legacy repository artifacts</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Import copies supported repo files into private workspace storage and leaves the repo files untouched.
+          </p>
+        </div>
+        {importable.length > 0 && (
+          <button
+            type="button"
+            onClick={onImport}
+            disabled={pending}
+            className="inline-flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[13px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+            Import
+          </button>
+        )}
+      </div>
+      <ul className="mt-3 grid gap-2 md:grid-cols-2">
+        {legacy.slice(0, 6).map((item) => (
+          <li key={`${item.kind}:${item.id}:${item.legacyRepoPath}`} className="rounded-md border px-2 py-1.5 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate font-medium">{item.title}</span>
+              <span className="shrink-0 text-muted-foreground">{item.imported ? "Imported" : "Importable"}</span>
+            </div>
+            <p className="mt-1 truncate font-mono text-muted-foreground">{item.legacyRepoPath}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function RepositoryRulesLink({
@@ -335,6 +420,7 @@ function ArtifactLink({
   repoSlug: string;
 }) {
   const isPrivate = artifact.metadata.private === true;
+  const isPrivateWorkspace = artifact.path.startsWith("private-workspace/");
 
   return (
     <Link
@@ -352,7 +438,7 @@ function ArtifactLink({
             {artifact.title}
           </h3>
         </div>
-        {isPrivate && (
+        {(isPrivate || isPrivateWorkspace) && (
           <span className="rounded-full border border-emerald-500/30 px-2 py-0.5 text-[10px] font-medium uppercase text-emerald-300">
             Private
           </span>

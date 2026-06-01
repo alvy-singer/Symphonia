@@ -8,6 +8,7 @@ defmodule SymphoniaService.HTTPServer do
   alias SymphoniaService.{
     CodingAssistant,
     MarkdownPages,
+    PrivateWorkspace,
     RepositoryRegistry,
     SpecWorkspace,
     TaskStore,
@@ -184,7 +185,8 @@ defmodule SymphoniaService.HTTPServer do
         {200, %{"repo" => repository["key"], "workspace" => Workspace.state(repository)}}
 
       ["api", "repositories", repo, "readiness"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         {200,
          %{
@@ -193,10 +195,24 @@ defmodule SymphoniaService.HTTPServer do
          }}
 
       ["api", "repositories", repo, "spec-workspace"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         {200,
          %{"repo" => repository["key"], "specWorkspace" => spec_workspace_payload(repository)}}
+
+      ["api", "repositories", repo, "private-workspace"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded_read(registry_path, actor, repository, "repository.view", fn ->
+          private_repository = private_repository(repository, registry_path)
+
+          {200,
+           %{
+             "repo" => repository["key"],
+             "privateWorkspace" => private_workspace_payload(private_repository)
+           }}
+        end)
 
       ["api", "repositories", repo, "pages"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -216,7 +232,9 @@ defmodule SymphoniaService.HTTPServer do
          %{"repo" => repository["key"], "page" => MarkdownPages.read_page(repository, page_id)}}
 
       ["api", "repositories", repo, "spec-workspace", "artifacts"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
+
         params = query_params(path)
 
         case Map.get(params, "type") do
@@ -234,7 +252,8 @@ defmodule SymphoniaService.HTTPServer do
         end
 
       ["api", "repositories", repo, "spec-workspace", "artifacts", type] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         artifacts =
           repository
@@ -244,8 +263,65 @@ defmodule SymphoniaService.HTTPServer do
         {200, %{"type" => type, "artifacts" => artifacts}}
 
       ["api", "repositories", repo, "spec-workspace", "artifacts", type, id] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
+
         {200, %{"artifact" => SpecWorkspace.read_artifact(repository, type, id)}}
+
+      ["api", "repositories", repo, "private-workspace", "artifacts"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded_read(registry_path, actor, repository, "repository.view", fn ->
+          private_repository = private_repository(repository, registry_path)
+          params = query_params(path)
+
+          case Map.get(params, "kind") || Map.get(params, "type") do
+            nil ->
+              {200,
+               %{
+                 "artifacts" =>
+                   public_spec_artifacts(PrivateWorkspace.list_artifacts(private_repository))
+               }}
+
+            kind ->
+              artifacts =
+                private_repository
+                |> PrivateWorkspace.list_artifacts(kind)
+                |> Enum.map(&public_spec_artifact/1)
+
+              {200, %{"kind" => kind, "type" => kind, "artifacts" => artifacts}}
+          end
+        end)
+
+      ["api", "repositories", repo, "private-workspace", "artifacts", kind] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded_read(registry_path, actor, repository, "repository.view", fn ->
+          private_repository = private_repository(repository, registry_path)
+
+          artifacts =
+            private_repository
+            |> PrivateWorkspace.list_artifacts(kind)
+            |> Enum.map(&public_spec_artifact/1)
+
+          {200, %{"kind" => kind, "type" => kind, "artifacts" => artifacts}}
+        end)
+
+      ["api", "repositories", repo, "private-workspace", "artifacts", kind, id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded_read(registry_path, actor, repository, "repository.view", fn ->
+          private_repository = private_repository(repository, registry_path)
+          {200, %{"artifact" => PrivateWorkspace.read_artifact(private_repository, kind, id)}}
+        end)
+
+      ["api", "repositories", repo, "private-workspace", "legacy"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded_read(registry_path, actor, repository, "repository.view", fn ->
+          private_repository = private_repository(repository, registry_path)
+          {200, %{"legacy" => PrivateWorkspace.legacy_artifacts(private_repository)}}
+        end)
 
       ["api", "github", "installations", "callback"] ->
         github = Repositories.complete_installation(query_params(path))
@@ -380,7 +456,8 @@ defmodule SymphoniaService.HTTPServer do
         end)
 
       ["api", "repositories", repo, "spec-workspace", "artifacts", type, id] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(
           registry_path,
@@ -392,6 +469,27 @@ defmodule SymphoniaService.HTTPServer do
             artifact = SpecWorkspace.update_artifact(repository, type, id, decode_json(body))
             {200, %{"artifact" => artifact}}
           end
+        )
+
+      ["api", "repositories", repo, "private-workspace", "artifacts", kind, id] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "repository.configure",
+          private_workspace_target(kind, id),
+          fn ->
+            private_repository = private_repository(repository, registry_path)
+
+            artifact =
+              PrivateWorkspace.update_artifact(private_repository, kind, id, decode_json(body))
+
+            {200, %{"artifact" => artifact}}
+          end,
+          %{"artifactKind" => kind, "artifactId" => id},
+          "private_workspace.artifact_updated"
         )
 
       ["api", "repositories", repo, "tasks", task_key] ->
@@ -811,7 +909,8 @@ defmodule SymphoniaService.HTTPServer do
         )
 
       ["api", "repositories", repo, "spec-workspace", "initialize"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "workspace.initialize", workflow_target(), fn ->
           SpecWorkspace.initialize(repository)
@@ -819,6 +918,29 @@ defmodule SymphoniaService.HTTPServer do
           {200,
            %{"repo" => repository["key"], "specWorkspace" => spec_workspace_payload(repository)}}
         end)
+
+      ["api", "repositories", repo, "private-workspace", "initialize"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "repository.configure",
+          private_workspace_target(),
+          fn ->
+            private_repository = private_repository(repository, registry_path)
+            PrivateWorkspace.initialize(private_repository)
+
+            {200,
+             %{
+               "repo" => repository["key"],
+               "privateWorkspace" => private_workspace_payload(private_repository)
+             }}
+          end,
+          %{},
+          "private_workspace.initialized"
+        )
 
       ["api", "repositories", repo, "readiness", "spec-workspace", "initialize"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -831,7 +953,8 @@ defmodule SymphoniaService.HTTPServer do
         end)
 
       ["api", "repositories", repo, "spec-workspace", "artifacts", type] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "repository.configure", workflow_target(), fn ->
           artifact = SpecWorkspace.create_artifact(repository, type, decode_json(body))
@@ -839,7 +962,8 @@ defmodule SymphoniaService.HTTPServer do
         end)
 
       ["api", "repositories", repo, "spec-workspace", "milestones"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "repository.configure", workflow_target(), fn ->
           artifact = SpecWorkspace.create_milestone(repository, decode_json(body))
@@ -847,7 +971,8 @@ defmodule SymphoniaService.HTTPServer do
         end)
 
       ["api", "repositories", repo, "spec-workspace", "requirements"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "repository.configure", workflow_target(), fn ->
           artifact = SpecWorkspace.create_requirement(repository, decode_json(body))
@@ -855,7 +980,8 @@ defmodule SymphoniaService.HTTPServer do
         end)
 
       ["api", "repositories", repo, "spec-workspace", "plans"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "repository.configure", workflow_target(), fn ->
           artifact = SpecWorkspace.create_plan(repository, decode_json(body))
@@ -863,7 +989,8 @@ defmodule SymphoniaService.HTTPServer do
         end)
 
       ["api", "repositories", repo, "spec-workspace", "decisions"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "repository.configure", workflow_target(), fn ->
           artifact = SpecWorkspace.create_decision(repository, decode_json(body))
@@ -871,12 +998,73 @@ defmodule SymphoniaService.HTTPServer do
         end)
 
       ["api", "repositories", repo, "spec-workspace", "task-briefs"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "repository.configure", workflow_target(), fn ->
           artifact = SpecWorkspace.create_task_brief(repository, decode_json(body))
           {201, %{"artifact" => artifact}}
         end)
+
+      ["api", "repositories", repo, "private-workspace", "artifacts", kind] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "repository.configure",
+          private_workspace_target(kind),
+          fn ->
+            private_repository = private_repository(repository, registry_path)
+
+            artifact =
+              PrivateWorkspace.create_artifact(private_repository, kind, decode_json(body))
+
+            {201, %{"artifact" => artifact}}
+          end,
+          %{"artifactKind" => kind},
+          "private_workspace.artifact_created"
+        )
+
+      ["api", "repositories", repo, "private-workspace", "legacy", "import"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "repository.configure",
+          private_workspace_target("legacy"),
+          fn ->
+            private_repository = private_repository(repository, registry_path)
+            result = PrivateWorkspace.import_legacy(private_repository, decode_json(body))
+            {200, result}
+          end,
+          %{"reasonCode" => "legacy_import"},
+          "private_workspace.legacy_imported"
+        )
+
+      ["api", "repositories", repo, "private-workspace", "artifacts", kind, id, "export"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "repository.configure",
+          private_workspace_target(kind, id),
+          fn ->
+            private_repository = private_repository(repository, registry_path)
+
+            artifact =
+              PrivateWorkspace.export_artifact(private_repository, kind, id, decode_json(body))
+
+            {200, %{"artifact" => artifact}}
+          end,
+          %{"artifactKind" => kind, "artifactId" => id},
+          "private_workspace.artifact_exported"
+        )
 
       ["api", "repositories", repo, "pages"] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
@@ -894,18 +1082,22 @@ defmodule SymphoniaService.HTTPServer do
         )
 
       ["api", "repositories", repo, "clarise", "extract"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
+
         {200, ArtifactExtractor.extract(repository, decode_json(body))}
 
       ["api", "repositories", repo, "clarise", "milestones", "start"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "repository.configure", workflow_target(), fn ->
           {201, MilestoneLoop.start(repository, decode_json(body))}
         end)
 
       ["api", "repositories", repo, "clarise", "milestones", milestone, "discuss"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(
           registry_path,
@@ -919,7 +1111,8 @@ defmodule SymphoniaService.HTTPServer do
         )
 
       ["api", "repositories", repo, "clarise", "milestones", milestone, "requirements"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(
           registry_path,
@@ -933,7 +1126,8 @@ defmodule SymphoniaService.HTTPServer do
         )
 
       ["api", "repositories", repo, "clarise", "milestones", milestone, "plan"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(
           registry_path,
@@ -947,7 +1141,8 @@ defmodule SymphoniaService.HTTPServer do
         )
 
       ["api", "repositories", repo, "clarise", "milestones", milestone, "decisions"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(
           registry_path,
@@ -961,7 +1156,8 @@ defmodule SymphoniaService.HTTPServer do
         )
 
       ["api", "repositories", repo, "clarise", "milestones", milestone, "approve"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(
           registry_path,
@@ -975,7 +1171,8 @@ defmodule SymphoniaService.HTTPServer do
         )
 
       ["api", "repositories", repo, "clarise", "milestones", milestone, "tasks", "propose"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(
           registry_path,
@@ -989,7 +1186,8 @@ defmodule SymphoniaService.HTTPServer do
         )
 
       ["api", "repositories", repo, "clarise", "milestones", milestone, "tasks", "create"] ->
-        repository = RepositoryRegistry.get!(registry_path, repo)
+        repository =
+          private_repository(RepositoryRegistry.get!(registry_path, repo), registry_path)
 
         guarded(registry_path, actor, repository, "task.create", workflow_target(milestone), fn ->
           {201,
@@ -1611,11 +1809,19 @@ defmodule SymphoniaService.HTTPServer do
   defp audit_heartbeat_transition(_registry_path, _actor, _runner, _transition), do: :ok
 
   defp repository_target, do: %{"type" => "repository"}
+  defp private_workspace_target(id \\ nil), do: %{"type" => "private_workspace", "id" => id}
+
+  defp private_workspace_target(kind, id), do: private_workspace_target("#{kind}:#{id}")
+
   defp workflow_target(id \\ nil), do: %{"type" => "workflow", "id" => id}
   defp harness_target, do: %{"type" => "harness"}
   defp task_target(task_key), do: %{"type" => "task", "id" => task_key}
   defp runner_target(id \\ nil), do: %{"type" => "runner", "id" => id}
   defp global_repository, do: %{"key" => "GLOBAL"}
+
+  defp private_repository(repository, registry_path) do
+    Map.put(repository, "_registry_path", registry_path)
+  end
 
   defp runner_metadata(runner) do
     %{
@@ -1865,6 +2071,15 @@ defmodule SymphoniaService.HTTPServer do
     %{
       "state" => SpecWorkspace.state(repository),
       "sections" => SpecWorkspace.sections(repository)
+    }
+  end
+
+  defp private_workspace_payload(repository) do
+    %{
+      "state" => PrivateWorkspace.state(repository),
+      "sections" => PrivateWorkspace.sections(repository),
+      "legacy" => PrivateWorkspace.legacy_artifacts(repository),
+      "evidence" => PrivateWorkspace.list_evidence(repository)
     }
   end
 

@@ -153,7 +153,9 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "workspaceProvider" => run["workspace_provider"],
       "cleanupWarning" => run["cleanup_warning"],
       "reviewBranch" => run["review_branch"],
+      "curatedSummaryId" => run["curated_summary_id"],
       "curatedSummaryPath" => run["curated_summary_path"],
+      "evidenceIds" => run["evidence_ids"],
       "retryAt" => run["retry_at"],
       "failureClass" => run["failure_class"],
       "attempt" => run["attempt"],
@@ -277,7 +279,9 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "turn_id",
       "eligibility_reason",
       "review_branch",
+      "curated_summary_id",
       "curated_summary_path",
+      "evidence_ids",
       "failure_class",
       "retry_at",
       "retry_of",
@@ -338,7 +342,9 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "displayStep" => RunEvents.display_step(event_run),
       "displayMessage" => RunEvents.display_message(event_run),
       "reviewBranch" => run["review_branch"],
+      "curatedSummaryId" => run["curated_summary_id"],
       "curatedSummaryPath" => run["curated_summary_path"],
+      "evidenceIds" => run["evidence_ids"],
       "updatedAt" => event["at"] || run["updated_at"]
     }
     |> reject_nil()

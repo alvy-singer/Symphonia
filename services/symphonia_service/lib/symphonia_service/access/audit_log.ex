@@ -23,9 +23,16 @@ defmodule SymphoniaService.Access.AuditLog do
     capabilitySummary
     secretScope
     secretSource
+    artifactKind
+    artifactId
+    revisionId
+    exportStatus
+    legacyRepoPath
+    evidenceKind
+    evidenceId
   )
 
-  @target_types ~w(repository task run review pull_request harness workflow runner secret_reference)
+  @target_types ~w(repository task run review pull_request harness workflow runner secret_reference private_workspace)
 
   def path(registry_path) do
     Path.join([Path.dirname(registry_path), "audit", "events.jsonl"])

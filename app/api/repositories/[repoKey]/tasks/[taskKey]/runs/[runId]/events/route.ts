@@ -12,7 +12,9 @@ interface RunProgressEvent {
   displayStep?: string;
   displayMessage?: string;
   reviewBranch?: string;
+  curatedSummaryId?: string;
   curatedSummaryPath?: string;
+  evidenceIds?: string[];
   updatedAt?: string;
 }
 
@@ -106,7 +108,9 @@ function formatRunProgressEvent(event: RunProgressEvent): string {
     displayStep: event.displayStep,
     displayMessage: event.displayMessage,
     reviewBranch: event.reviewBranch,
+    curatedSummaryId: event.curatedSummaryId,
     curatedSummaryPath: event.curatedSummaryPath,
+    evidenceIds: event.evidenceIds,
     updatedAt: event.updatedAt,
   };
 

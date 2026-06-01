@@ -137,6 +137,51 @@ defmodule SymphoniaService.AccessHTTPTest do
     assert response.body["permissions"]["pull_request.open"] == false
   end
 
+  test "private workspace reads are viewable but writes require configure and audit metadata is safe",
+       %{
+         port: port,
+         registry_path: registry_path,
+         repository: repository
+       } do
+    read_response =
+      http_json(port, "GET", "/api/repositories/SYM/private-workspace", "", [
+        {"x-symphonia-role", "viewer"}
+      ])
+
+    assert read_response.status == 200
+    assert read_response.body["privateWorkspace"]["state"]["missingDirectories"] == []
+
+    denied =
+      http_json(
+        port,
+        "POST",
+        "/api/repositories/SYM/private-workspace/artifacts/milestone",
+        ~s({"title":"Denied milestone","body":"raw provider output"}),
+        [{"x-symphonia-role", "viewer"}]
+      )
+
+    assert denied.status == 403
+
+    created =
+      http_json(
+        port,
+        "POST",
+        "/api/repositories/SYM/private-workspace/artifacts/milestone",
+        ~s({"title":"Private milestone","body":"SECRET_TOKEN=value /Users/local/repo"}),
+        [{"x-symphonia-role", "maintainer"}]
+      )
+
+    assert created.status == 201
+    assert created.body["artifact"]["path"] =~ "private-workspace/milestone/"
+
+    audit = JSON.encode!(AuditLog.list(registry_path, repository, limit: :all))
+    assert audit =~ "private_workspace.artifact_created"
+    assert audit =~ "artifactKind"
+    refute audit =~ "SECRET_TOKEN=value"
+    refute audit =~ "/Users/local"
+    refute audit =~ "raw provider output"
+  end
+
   defp http_json(port, method, path, body, headers) do
     {:ok, socket} = :gen_tcp.connect(~c"localhost", port, [:binary, active: false], 5_000)
 

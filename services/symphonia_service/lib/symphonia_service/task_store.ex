@@ -463,7 +463,9 @@ defmodule SymphoniaService.TaskStore do
       "workspaceProvider" => run["workspace_provider"],
       "cleanupWarning" => run["cleanup_warning"],
       "reviewBranch" => run["review_branch"],
+      "curatedSummaryId" => run["curated_summary_id"],
       "curatedSummaryPath" => run["curated_summary_path"],
+      "evidenceIds" => run["evidence_ids"],
       "retryAt" => run["retry_at"],
       "failureClass" => run["failure_class"],
       "attempt" => run["attempt"],
@@ -495,7 +497,9 @@ defmodule SymphoniaService.TaskStore do
       "nextReviewAction" => handoff["next_review_action"],
       "headBranch" => handoff["head_branch"],
       "baseBranch" => handoff["base_branch"],
+      "curatedSummaryId" => handoff["curated_summary_id"],
       "curatedSummaryPath" => handoff["curated_summary_path"],
+      "evidenceIds" => handoff["evidence_ids"],
       "validationEvidence" => public_validation_evidence(handoff["validation_evidence"])
     }
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)

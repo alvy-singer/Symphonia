@@ -32,7 +32,8 @@ defmodule SymphoniaService.Harness.Reconciler do
       summary: %{
         "at" => iso8601(now),
         "reconciled" => length(decisions),
-        "stale" => Enum.count(decisions, &(&1["code"] in ["stale_run_failed", "missing_workspace_failed"]))
+        "stale" =>
+          Enum.count(decisions, &(&1["code"] in ["stale_run_failed", "missing_workspace_failed"]))
       }
     }
   end
@@ -72,10 +73,14 @@ defmodule SymphoniaService.Harness.Reconciler do
 
       cond do
         repository == nil ->
-          failed = RunStore.mark_failed(run, missing_repository_message(), missing_repository_message())
+          failed =
+            RunStore.mark_failed(run, missing_repository_message(), missing_repository_message())
 
           [
-            DecisionLog.reconcile(run["repository"], run["task"], "missing_repository_failed",
+            DecisionLog.reconcile(
+              run["repository"],
+              run["task"],
+              "missing_repository_failed",
               missing_repository_message(),
               run_id: failed["id"]
             )
@@ -85,7 +90,11 @@ defmodule SymphoniaService.Harness.Reconciler do
           failed = RunStore.mark_failed(run, missing_task_message(), missing_task_message())
 
           [
-            DecisionLog.reconcile(repository, run["task"], "missing_task_failed", missing_task_message(),
+            DecisionLog.reconcile(
+              repository,
+              run["task"],
+              "missing_task_failed",
+              missing_task_message(),
               run_id: failed["id"]
             )
           ]
@@ -93,7 +102,10 @@ defmodule SymphoniaService.Harness.Reconciler do
         handoff_exists?(task) ->
           message = "Run was marked failed because the task already has a review handoff."
           failed = RunStore.mark_failed(run, message, message)
-          TaskStore.patch_task(repository, task["key"], %{"frontmatter" => %{"run" => run_frontmatter(failed)}})
+
+          TaskStore.patch_task(repository, task["key"], %{
+            "frontmatter" => %{"run" => run_frontmatter(failed)}
+          })
 
           [
             DecisionLog.reconcile(repository, task, "handoff_preserved", message,
@@ -137,9 +149,17 @@ defmodule SymphoniaService.Harness.Reconciler do
           case RunStore.get(run_id) do
             nil ->
               message = "Run was marked failed because its private run metadata is missing."
-              task = TaskStore.apply_event(repository, task["key"], "fail_run", %{"explanation" => message})
+
+              task =
+                TaskStore.apply_event(repository, task["key"], "fail_run", %{
+                  "explanation" => message
+                })
+
               failed_run = failed_task_run_frontmatter(task, message)
-              TaskStore.patch_task(repository, task["key"], %{"frontmatter" => %{"run" => failed_run}})
+
+              TaskStore.patch_task(repository, task["key"], %{
+                "frontmatter" => %{"run" => failed_run}
+              })
 
               [
                 DecisionLog.reconcile(repository, task, "missing_run_metadata", message,
@@ -153,7 +173,10 @@ defmodule SymphoniaService.Harness.Reconciler do
               })
 
               [
-                DecisionLog.reconcile(repository, task, "task_run_frontmatter_refreshed",
+                DecisionLog.reconcile(
+                  repository,
+                  task,
+                  "task_run_frontmatter_refreshed",
                   "Task run metadata was refreshed from the private run store.",
                   run_id: run_id
                 )
@@ -176,18 +199,24 @@ defmodule SymphoniaService.Harness.Reconciler do
          "Run was marked failed because its local workspace is missing."}
 
       run["state"] == "queued" and
-          stale_since?(run["created_at"] || run["updated_at"], thresholds.queued_stale_after_ms, now) ->
+          stale_since?(
+            run["created_at"] || run["updated_at"],
+            thresholds.queued_stale_after_ms,
+            now
+          ) ->
         {"run_failed", "stale_run_failed",
          "Run was marked failed because it stayed queued for too long."}
 
       run["state"] == "running" and
-          stale_since?(run["started_at"] || run["updated_at"], thresholds.running_stale_after_ms, now) ->
-        {"run_failed", "stale_run_failed",
-         "Run was marked failed because it stopped updating."}
+          stale_since?(
+            run["started_at"] || run["updated_at"],
+            thresholds.running_stale_after_ms,
+            now
+          ) ->
+        {"run_failed", "stale_run_failed", "Run was marked failed because it stopped updating."}
 
       stale_since?(run["updated_at"], thresholds.heartbeat_stale_after_ms, now) ->
-        {"run_failed", "stale_run_failed",
-         "Run was marked failed because it stopped updating."}
+        {"run_failed", "stale_run_failed", "Run was marked failed because it stopped updating."}
 
       true ->
         nil
@@ -217,7 +246,9 @@ defmodule SymphoniaService.Harness.Reconciler do
       "paused_reason" => paused_reason
     })
 
-    TaskStore.patch_task(repository, task["key"], %{"frontmatter" => %{"run" => run_frontmatter(run)}})
+    TaskStore.patch_task(repository, task["key"], %{
+      "frontmatter" => %{"run" => run_frontmatter(run)}
+    })
   end
 
   defp failed_task_run_frontmatter(task, message) do
@@ -245,7 +276,9 @@ defmodule SymphoniaService.Harness.Reconciler do
       "display_message" => RunEvents.display_message(run),
       "eligibility_reason" => run["eligibility_reason"],
       "review_branch" => run["review_branch"],
+      "curated_summary_id" => run["curated_summary_id"],
       "curated_summary_path" => run["curated_summary_path"],
+      "evidence_ids" => run["evidence_ids"],
       "retry_at" => run["retry_at"],
       "failure_class" => run["failure_class"],
       "attempt" => run["attempt"],
@@ -256,11 +289,15 @@ defmodule SymphoniaService.Harness.Reconciler do
     |> reject_nil()
   end
 
-  defp task_run_id(task), do: get_in(task, ["run", "id"]) || get_in(task, [:frontmatter, "run", "id"])
+  defp task_run_id(task),
+    do: get_in(task, ["run", "id"]) || get_in(task, [:frontmatter, "run", "id"])
+
   defp handoff_exists?(%{"handoff" => handoff}) when is_map(handoff), do: map_size(handoff) > 0
   defp handoff_exists?(_task), do: false
 
-  defp missing_repository_message, do: "Run was marked failed because its repository is no longer registered."
+  defp missing_repository_message,
+    do: "Run was marked failed because its repository is no longer registered."
+
   defp missing_task_message, do: "Run was marked failed because its task is missing."
 
   defp reject_nil(map), do: map |> Enum.reject(fn {_key, value} -> is_nil(value) end) |> Map.new()

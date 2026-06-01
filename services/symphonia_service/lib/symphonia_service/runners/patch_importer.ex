@@ -11,10 +11,13 @@ defmodule SymphoniaService.Runners.PatchImporter do
     RunStore
   }
 
+  alias SymphoniaService.PrivateWorkspace
   alias SymphoniaService.Runners.{ImportLock, PatchBundle, RemoteResult}
   alias SymphoniaService.Validation.{Evidence, Policy, Runner}
 
-  def import(_registry_path, repository, task, run, assignment, result) do
+  def import(registry_path, repository, task, run, assignment, result) do
+    repository = private_repository(repository, registry_path)
+
     ImportLock.with_lock(run["id"], fn ->
       with {:ok, patch} <- PatchBundle.validate(result, assignment) do
         do_import(repository, task, run, assignment, result, patch)
@@ -42,18 +45,18 @@ defmodule SymphoniaService.Runners.PatchImporter do
            :ok <- reject_symlink_outputs(context.repo_path, patch["changed_files"]),
            {:ok, changes} <- reviewable_changes(run, context.repo_path),
            :ok <- ensure_committable_changes(changes),
-           {:ok, validation} <- run_validation(run, context.repo_path, task),
-           {:ok, summary_path} <-
+           {:ok, validation} <- run_validation(repository, run, context.repo_path, task),
+           {:ok, summary} <-
              write_summary(
+               repository,
                run,
-               context.repo_path,
                task,
                changes,
                result,
                validation["public_evidence"]
              ),
-           :ok <- commit_and_push(run, context, task, changes, summary_path) do
-        files_changed = Enum.sort(changes["committable"] ++ [summary_path])
+           :ok <- commit_and_push(run, context, task, changes) do
+        files_changed = Enum.sort(changes["committable"])
 
         handoff =
           HandoffBuilder.build_from_changes(
@@ -65,7 +68,9 @@ defmodule SymphoniaService.Runners.PatchImporter do
           )
           |> Map.put("head_branch", context.head_branch)
           |> Map.put("base_branch", context.base_branch)
-          |> Map.put("curated_summary_path", summary_path)
+          |> Map.put("curated_summary_id", summary["id"])
+          |> Map.put("curated_summary_path", private_summary_ref(summary))
+          |> Map.put("evidence_ids", validation["evidence_ids"])
           |> maybe_failed_validation_next_action(validation["results"])
 
         completed_run =
@@ -137,12 +142,18 @@ defmodule SymphoniaService.Runners.PatchImporter do
   defp ensure_committable_changes(%{"committable" => []}), do: {:error, "no_reviewable_files"}
   defp ensure_committable_changes(_changes), do: :ok
 
-  defp run_validation(run, repo_path, task) do
+  defp run_validation(repository, run, repo_path, task) do
     RunStore.mark_step(run, "Validating imported changes")
 
     policy = Policy.load(repo_path, task)
     {:ok, results} = Runner.run(repo_path, policy)
     public_evidence = Evidence.public(results)
+
+    evidence_records =
+      PrivateWorkspace.record_validation_evidence(repository, run, public_evidence)
+
+    evidence_ids = Enum.map(evidence_records, & &1["id"])
+    RunStore.update_metadata(run, %{"evidence_ids" => evidence_ids})
 
     RunStore.record_provider_output(run, %{
       "validation" => %{"policy" => policy, "results" => results}
@@ -152,16 +163,17 @@ defmodule SymphoniaService.Runners.PatchImporter do
      %{
        "policy" => policy,
        "results" => results,
-       "public_evidence" => public_evidence
+       "public_evidence" => public_evidence,
+       "evidence_ids" => evidence_ids
      }}
   rescue
     error -> {:error, Exception.message(error)}
   end
 
-  defp write_summary(run, repo_path, task, changes, result, validation_evidence) do
-    summary_path =
-      CuratedSummary.write!(
-        repo_path,
+  defp write_summary(repository, run, task, changes, result, validation_evidence) do
+    summary =
+      CuratedSummary.write_private!(
+        repository,
         task,
         RunStore.get(run["id"]) || run,
         changes["committable"],
@@ -169,19 +181,23 @@ defmodule SymphoniaService.Runners.PatchImporter do
         validation_evidence
       )
 
-    RunStore.update_metadata(run, %{"curated_summary_path" => summary_path})
-    {:ok, summary_path}
+    RunStore.update_metadata(run, %{
+      "curated_summary_id" => summary["id"],
+      "curated_summary_path" => private_summary_ref(summary)
+    })
+
+    {:ok, summary}
   rescue
     error -> {:error, Exception.message(error)}
   end
 
-  defp commit_and_push(run, context, task, changes, summary_path) do
+  defp commit_and_push(run, context, task, changes) do
     RunStore.mark_step(run, "Creating review branch")
 
     BranchManager.commit_files!(
       context,
       task,
-      Enum.sort(changes["committable"] ++ [summary_path])
+      Enum.sort(changes["committable"])
     )
 
     BranchManager.push_task_branch!(context)
@@ -189,6 +205,14 @@ defmodule SymphoniaService.Runners.PatchImporter do
   rescue
     error -> {:error, Exception.message(error)}
   end
+
+  defp private_summary_ref(summary), do: "private-workspace/run_summary/#{summary["id"]}"
+
+  defp private_repository(repository, registry_path) when is_binary(registry_path) do
+    Map.put(repository, "_registry_path", registry_path)
+  end
+
+  defp private_repository(repository, _registry_path), do: repository
 
   defp maybe_failed_validation_next_action(handoff, results) do
     if Evidence.has_failed_required?(results) do

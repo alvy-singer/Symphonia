@@ -11,19 +11,18 @@ defmodule SymphoniaService.Clarise.MilestoneLoop do
   }
 
   alias SymphoniaService.SpecWorkspace
-  alias SymphoniaService.SpecWorkspace.Store
 
   def questions, do: MilestoneDiscussion.questions()
 
   def start(repository, attrs \\ %{}) do
     SpecWorkspace.initialize(repository)
 
-    id = Store.next_id(repository, "milestone")
+    id = SpecWorkspace.next_id(repository, "milestone")
     title = string_attr(attrs, "title") || "Untitled milestone"
     goal = string_attr(attrs, "goal") || ""
 
     milestone =
-      Store.create_artifact(repository, "milestone", id, %{
+      SpecWorkspace.create_artifact(repository, "milestone", id, %{
         "title" => title,
         "status" => "draft",
         "discussion" => linked_id(id, "discussion"),
@@ -61,7 +60,7 @@ defmodule SymphoniaService.Clarise.MilestoneLoop do
       })
 
     discussion =
-      Store.create_or_update_artifact(repository, "discussion", discussion_id, %{
+      SpecWorkspace.create_or_update_artifact(repository, "discussion", discussion_id, %{
         "title" => "#{title} discussion",
         "status" => "in_discussion",
         "related_milestone" => milestone["id"],
@@ -79,11 +78,20 @@ defmodule SymphoniaService.Clarise.MilestoneLoop do
   def requirements(repository, milestone_id, _payload \\ %{}) do
     milestone = read_milestone(repository, milestone_id)
     discussion_id = metadata_id(milestone, "discussion", linked_id(milestone["id"], "discussion"))
-    discussion = require_artifact!(repository, "discussion", discussion_id, "Discussion artifact is required.")
-    requirements_id = metadata_id(milestone, "requirements", linked_id(milestone["id"], "requirements"))
+
+    discussion =
+      require_artifact!(
+        repository,
+        "discussion",
+        discussion_id,
+        "Discussion artifact is required."
+      )
+
+    requirements_id =
+      metadata_id(milestone, "requirements", linked_id(milestone["id"], "requirements"))
 
     requirements =
-      Store.create_or_update_artifact(repository, "requirements", requirements_id, %{
+      SpecWorkspace.create_or_update_artifact(repository, "requirements", requirements_id, %{
         "title" => "#{milestone["title"]} requirements",
         "status" => "requirements_ready",
         "related_milestone" => milestone["id"],
@@ -100,12 +108,22 @@ defmodule SymphoniaService.Clarise.MilestoneLoop do
 
   def plan(repository, milestone_id, _payload \\ %{}) do
     milestone = read_milestone(repository, milestone_id)
-    requirements_id = metadata_id(milestone, "requirements", linked_id(milestone["id"], "requirements"))
-    requirements = require_artifact!(repository, "requirements", requirements_id, "Requirements artifact is required.")
+
+    requirements_id =
+      metadata_id(milestone, "requirements", linked_id(milestone["id"], "requirements"))
+
+    requirements =
+      require_artifact!(
+        repository,
+        "requirements",
+        requirements_id,
+        "Requirements artifact is required."
+      )
+
     plan_id = metadata_id(milestone, "plan", linked_id(milestone["id"], "plan"))
 
     plan =
-      Store.create_or_update_artifact(repository, "plan", plan_id, %{
+      SpecWorkspace.create_or_update_artifact(repository, "plan", plan_id, %{
         "title" => "#{milestone["title"]} plan",
         "status" => "plan_ready",
         "related_milestone" => milestone["id"],
@@ -128,11 +146,21 @@ defmodule SymphoniaService.Clarise.MilestoneLoop do
   def approve(repository, milestone_id, _payload \\ %{}) do
     milestone = read_milestone(repository, milestone_id)
     discussion_id = metadata_id(milestone, "discussion", linked_id(milestone["id"], "discussion"))
-    requirements_id = metadata_id(milestone, "requirements", linked_id(milestone["id"], "requirements"))
+
+    requirements_id =
+      metadata_id(milestone, "requirements", linked_id(milestone["id"], "requirements"))
+
     plan_id = metadata_id(milestone, "plan", linked_id(milestone["id"], "plan"))
 
     require_artifact!(repository, "discussion", discussion_id, "Discussion artifact is required.")
-    require_artifact!(repository, "requirements", requirements_id, "Requirements artifact is required.")
+
+    require_artifact!(
+      repository,
+      "requirements",
+      requirements_id,
+      "Requirements artifact is required."
+    )
+
     require_artifact!(repository, "plan", plan_id, "Plan artifact is required.")
 
     approved_at = now()
@@ -140,16 +168,18 @@ defmodule SymphoniaService.Clarise.MilestoneLoop do
     milestone =
       SpecWorkspace.update_artifact(repository, "milestone", milestone["id"], %{
         "metadata" => %{"status" => "approved", "approved_at" => approved_at},
-        "body" => append_approval(milestone["body"], approved_at, discussion_id, requirements_id, plan_id)
+        "body" =>
+          append_approval(milestone["body"], approved_at, discussion_id, requirements_id, plan_id)
       })
 
     %{"milestone" => milestone, "approved" => true}
   end
 
-  defp read_milestone(repository, id), do: SpecWorkspace.read_artifact(repository, "milestone", id)
+  defp read_milestone(repository, id),
+    do: SpecWorkspace.read_artifact(repository, "milestone", id)
 
   defp require_artifact!(repository, type, id, message) do
-    if Store.artifact_exists?(repository, type, id) do
+    if SpecWorkspace.artifact_exists?(repository, type, id) do
       SpecWorkspace.read_artifact(repository, type, id)
     else
       raise ArgumentError, message
@@ -222,7 +252,9 @@ defmodule SymphoniaService.Clarise.MilestoneLoop do
       pattern = ~r/(^## #{Regex.escape(heading)}\s*\n)(.*?)(?=^## |\z)/ms
 
       if Regex.match?(pattern, body) do
-        Regex.replace(pattern, body, fn _all, header, _old -> header <> "\n" <> value <> "\n\n" end)
+        Regex.replace(pattern, body, fn _all, header, _old ->
+          header <> "\n" <> value <> "\n\n"
+        end)
       else
         String.trim_trailing(body) <> "\n\n## #{heading}\n\n#{value}\n"
       end

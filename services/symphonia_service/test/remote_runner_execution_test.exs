@@ -13,7 +13,13 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
     SelectionPolicy
   }
 
-  alias SymphoniaService.{CodingAssistant, RepositoryRegistry, TaskStore, Workspace}
+  alias SymphoniaService.{
+    CodingAssistant,
+    PrivateWorkspace,
+    RepositoryRegistry,
+    TaskStore,
+    Workspace
+  }
 
   defmodule StubClient do
     def create_installation_token(_jwt, _installation_id) do
@@ -223,7 +229,16 @@ defmodule SymphoniaService.RemoteRunnerExecutionTest do
       ])
 
     assert branch_files =~ "lib/remote_runner_output.ex"
-    assert branch_files =~ completed_task["handoff"]["curatedSummaryPath"]
+    refute branch_files =~ completed_task["handoff"]["curatedSummaryPath"]
+
+    summary =
+      PrivateWorkspace.read_artifact(
+        Map.put(repository, "_registry_path", registry_path),
+        "run_summary",
+        completed_task["handoff"]["curatedSummaryId"]
+      )
+
+    assert summary["body"] =~ "Remote runner produced a reviewable patch."
 
     run = RunStore.get(result["run"]["id"])
     refute JSON.encode!(RunStore.public(run)) =~ "diff --git"

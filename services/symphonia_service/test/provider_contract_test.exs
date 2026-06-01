@@ -39,7 +39,7 @@ defmodule SymphoniaService.ProviderContractTest do
     assert source =~ "ChangeApplier.apply"
     assert source =~ "RunStore.record_provider_output"
     assert source =~ "run_validation"
-    assert source =~ "CuratedSummary.write!"
+    assert source =~ "CuratedSummary.write_private!"
     assert source =~ "HandoffBuilder.build_from_changes"
     assert source =~ "BranchManager.commit_files!"
     refute source =~ "PullRequests.open_from_task"

@@ -1,36 +1,31 @@
 defmodule SymphoniaService.CodingAssistant.CuratedSummary do
   @moduledoc """
-  Writes review-safe run summaries that can be committed with task branches.
+  Writes review-safe run summaries into the private workspace.
   """
 
   alias SymphoniaService.CodingAssistant.ValidationEvidence
+  alias SymphoniaService.PrivateWorkspace
 
-  def write!(
-        repo_path,
+  def write_private!(
+        repository,
         task,
-        _run,
+        run,
         files_changed,
         assistant_summary,
         validation_evidence \\ nil
       ) do
     validation_evidence = validation_evidence || ValidationEvidence.from_task(task)
+    id = "#{slug(task["key"])}-codex-handoff"
+    title = "#{task["key"]} Codex Run Summary"
 
-    relative_path =
-      Path.join([
-        "symphonia",
-        "run-summaries",
-        "#{slug(task["key"])}-codex-handoff.md"
-      ])
-
-    full_path = Path.join(repo_path, relative_path)
-    full_path |> Path.dirname() |> File.mkdir_p!()
-
-    File.write!(
-      full_path,
-      body(task, files_changed, assistant_summary, validation_evidence)
-    )
-
-    relative_path
+    PrivateWorkspace.create_or_update_artifact(repository, "run_summary", id, %{
+      "title" => title,
+      "status" => "created",
+      "source" => "coding_assistant",
+      "task_key" => task["key"],
+      "run_id" => run["id"],
+      "body" => body(task, files_changed, assistant_summary, validation_evidence)
+    })
   end
 
   defp body(task, files_changed, assistant_summary, validation_evidence) do

@@ -3,8 +3,6 @@ defmodule SymphoniaService.SpecWorkspace.Index do
   Groups spec artifacts for the repository UI.
   """
 
-  alias SymphoniaService.SpecWorkspace.Store
-
   @sections [
     {"Codebase", ["codebase_map", "codebase_conventions", "codebase_architecture"]},
     {"Milestones", ["milestone"]},
@@ -17,7 +15,7 @@ defmodule SymphoniaService.SpecWorkspace.Index do
   ]
 
   def sections(repository) do
-    artifacts = Store.list_artifacts(repository)
+    artifacts = SymphoniaService.SpecWorkspace.list_artifacts(repository)
 
     Enum.map(@sections, fn {label, types} ->
       section_artifacts =

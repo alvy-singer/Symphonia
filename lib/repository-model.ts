@@ -17,7 +17,8 @@ export type SpecArtifactType =
   | "plan"
   | "task_proposal"
   | "task_brief"
-  | "decision";
+  | "decision"
+  | "run_summary";
 
 export type SpecArtifactStatus =
   | "draft"
@@ -46,6 +47,17 @@ export interface SpecArtifact {
   createdAt?: string;
   updatedAt?: string;
   path: string;
+  latestRevisionId?: string;
+  exportStatus?:
+    | "never_exported"
+    | "linked"
+    | "changed_since_export"
+    | "pr_open"
+    | "conflict"
+    | "unlinked";
+  legacyRepoPath?: string;
+  reviewBranch?: string;
+  githubPrUrl?: string;
   metadata: Record<string, unknown> & {
     type: SpecArtifactType;
     id: string;
@@ -54,6 +66,11 @@ export interface SpecArtifact {
     created_at?: string;
     updated_at?: string;
     source?: string;
+    latest_revision_id?: string;
+    export_status?: string;
+    legacy_repo_path?: string;
+    review_branch?: string;
+    github_pr_url?: string;
     discussion?: string;
     requirements?: string;
     plan?: string;
@@ -86,6 +103,32 @@ export interface SpecWorkspaceSection {
 export interface SpecWorkspacePayload {
   state: SpecWorkspaceState;
   sections: SpecWorkspaceSection[];
+  legacy?: LegacyWorkspaceArtifact[];
+  evidence?: PrivateWorkspaceEvidence[];
+}
+
+export interface LegacyWorkspaceArtifact {
+  type: SpecArtifactType;
+  kind: SpecArtifactType;
+  id: string;
+  title: string;
+  status: SpecArtifactStatus;
+  legacyRepoPath: string;
+  imported?: boolean;
+  privateArtifactId?: string;
+  exportStatus?: SpecArtifact["exportStatus"];
+}
+
+export interface PrivateWorkspaceEvidence {
+  kind: string;
+  id: string;
+  title?: string;
+  status?: string;
+  artifactId?: string;
+  runId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  payload?: Record<string, unknown>;
 }
 
 export interface MarkdownPage {

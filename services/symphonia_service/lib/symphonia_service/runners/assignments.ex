@@ -33,7 +33,13 @@ defmodule SymphoniaService.Runners.Assignments do
     base_sha = current_head_sha!(repository["path"])
     head_branch = BranchManager.task_branch(task)
 
-    context_pack = public_context_pack(repository, task, base_branch, head_branch)
+    context_pack =
+      public_context_pack(
+        private_repository(repository, registry_path),
+        task,
+        base_branch,
+        head_branch
+      )
 
     assignment =
       AssignmentStore.create(registry_path, %{
@@ -79,7 +85,14 @@ defmodule SymphoniaService.Runners.Assignments do
         "base_sha" => base_sha,
         "repository" => repository_payload(repository, base_branch, base_sha),
         "context_pack" =>
-          sandbox_context_pack(repository, task, base_branch, head_branch, provider, params),
+          sandbox_context_pack(
+            private_repository(repository, registry_path),
+            task,
+            base_branch,
+            head_branch,
+            provider,
+            params
+          ),
         "params" => sandbox_params(params)
       })
       |> finalize_sandbox_context(registry_path)
@@ -99,7 +112,9 @@ defmodule SymphoniaService.Runners.Assignments do
         actor,
         "provider.gemini_cli_run_selected",
         assignment,
-        "completed", workspaceProvider: "cloud_sandbox")
+        "completed",
+        workspaceProvider: "cloud_sandbox"
+      )
     end
 
     {:ok, assignment}
@@ -560,7 +575,9 @@ defmodule SymphoniaService.Runners.Assignments do
       "assignment_id" => run["assignment_id"],
       "workspace_provider" => run["workspace_provider"],
       "review_branch" => run["review_branch"],
+      "curated_summary_id" => run["curated_summary_id"],
       "curated_summary_path" => run["curated_summary_path"],
+      "evidence_ids" => run["evidence_ids"],
       "cleanup_warning" => run["cleanup_warning"],
       "retry_at" => run["retry_at"],
       "failure_class" => run["failure_class"],
@@ -666,6 +683,12 @@ defmodule SymphoniaService.Runners.Assignments do
       _other -> "codex_app_server"
     end
   end
+
+  defp private_repository(repository, registry_path) when is_binary(registry_path) do
+    Map.put(repository, "_registry_path", registry_path)
+  end
+
+  defp private_repository(repository, _registry_path), do: repository
 
   defp repository_payload(repository, base_branch, base_sha) do
     %{

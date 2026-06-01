@@ -24,10 +24,11 @@ const WORKSPACE_GROUPS = [
   { label: "Codebase", sectionLabels: ["Codebase"] },
   {
     label: "Milestones",
-    sectionLabels: ["Milestones", "Discussions", "Requirements", "Task proposals", "Task briefs"],
+    sectionLabels: ["Milestones"],
   },
   { label: "Plans", sectionLabels: ["Plans"] },
   { label: "Decisions", sectionLabels: ["Decisions"] },
+  { label: "Run summaries", sectionLabels: ["Run summaries"] },
 ] satisfies Array<{
   label: string;
   sectionLabels: string[];
@@ -46,18 +47,18 @@ export function DocTree({ repoKey }: Props) {
   const [specPending, setSpecPending] = useState<string | null>(null);
 
   const loadSpecWorkspace = useCallback(async () => {
-    const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace`, {
+    const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/private-workspace`, {
       cache: "no-store",
     });
     const payload = (await res.json()) as {
-      specWorkspace?: SpecWorkspacePayload;
+      privateWorkspace?: SpecWorkspacePayload;
       error?: string;
     };
-    if (!res.ok || !payload.specWorkspace) {
+    if (!res.ok || !payload.privateWorkspace) {
       throw new Error(payload.error ?? "Could not load planning documents");
     }
-    setSpecWorkspace(payload.specWorkspace);
-    return payload.specWorkspace;
+    setSpecWorkspace(payload.privateWorkspace);
+    return payload.privateWorkspace;
   }, [repoKey]);
 
   useEffect(() => {
@@ -84,17 +85,17 @@ export function DocTree({ repoKey }: Props) {
     setSpecPending("initialize");
     try {
       const res = await fetch(
-        `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/initialize`,
+        `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/initialize`,
         { method: "POST" },
       );
       const payload = (await res.json()) as {
-        specWorkspace?: SpecWorkspacePayload;
+        privateWorkspace?: SpecWorkspacePayload;
         error?: string;
       };
-      if (!res.ok || !payload.specWorkspace) {
+      if (!res.ok || !payload.privateWorkspace) {
         throw new Error(payload.error ?? "Could not set up planning documents");
       }
-      setSpecWorkspace(payload.specWorkspace);
+      setSpecWorkspace(payload.privateWorkspace);
     } catch {
       setSpecWorkspace(null);
     } finally {
@@ -107,7 +108,7 @@ export function DocTree({ repoKey }: Props) {
     setSpecPending(pendingKey);
     try {
       const res = await fetch(
-        `/api/repositories/${encodeURIComponent(repoKey)}/spec-workspace/artifacts/${encodeURIComponent(
+        `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/artifacts/${encodeURIComponent(
           artifact.type,
         )}/${encodeURIComponent(artifact.id)}`,
         {
@@ -176,13 +177,13 @@ export function DocTree({ repoKey }: Props) {
 
       {!workspaceInitialized && (
         <div className="rounded-md border border-dashed px-2 py-2">
-          <p className="text-[11px] text-muted-foreground">Set up planning documents for this repository.</p>
+          <p className="text-[11px] text-muted-foreground">Set up private workspace files for this repository.</p>
           <button
             onClick={initializeSpecWorkspace}
             disabled={specPending === "initialize"}
             className="mt-2 rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {specPending === "initialize" ? "Creating..." : "Set up planning docs"}
+            {specPending === "initialize" ? "Creating..." : "Set up private workspace"}
           </button>
         </div>
       )}
