@@ -279,7 +279,7 @@ export function SidebarBody({ repoKey, onNavigate }: Props) {
               />
             )}
           </div>
-          <DocTree repoKey={repoKey} />
+          <DocTree repoKey={repoKey} onNavigate={handleNav} />
         </div>
 
         <div>

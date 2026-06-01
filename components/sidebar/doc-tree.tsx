@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   repoKey: string;
+  onNavigate?: () => void;
 }
 
 const WORKSPACE_GROUPS = [
@@ -34,17 +35,27 @@ const WORKSPACE_GROUPS = [
   sectionLabels: string[];
 }>;
 
+const EXPORT_STATUS_LABELS: Record<string, string> = {
+  never_exported: "Private",
+  linked: "Linked",
+  changed_since_export: "Changed",
+  pr_open: "PR open",
+  conflict: "Conflict",
+  unlinked: "Unlinked",
+};
+
 /**
  * Notion-like document tree, scoped to one repository.
  *
  * Planning artifacts and repository rules are shown as workspace files.
  */
-export function DocTree({ repoKey }: Props) {
+export function DocTree({ repoKey, onNavigate }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const slug = repoKey.toLowerCase();
   const [specWorkspace, setSpecWorkspace] = useState<SpecWorkspacePayload | null>(null);
   const [specPending, setSpecPending] = useState<string | null>(null);
+  const [specError, setSpecError] = useState<string | null>(null);
 
   const loadSpecWorkspace = useCallback(async () => {
     const res = await fetch(`/api/repositories/${encodeURIComponent(repoKey)}/private-workspace`, {
@@ -83,6 +94,7 @@ export function DocTree({ repoKey }: Props) {
 
   const initializeSpecWorkspace = async () => {
     setSpecPending("initialize");
+    setSpecError(null);
     try {
       const res = await fetch(
         `/api/repositories/${encodeURIComponent(repoKey)}/private-workspace/initialize`,
@@ -96,8 +108,12 @@ export function DocTree({ repoKey }: Props) {
         throw new Error(payload.error ?? "Could not set up planning documents");
       }
       setSpecWorkspace(payload.privateWorkspace);
-    } catch {
-      setSpecWorkspace(null);
+      window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
+      router.push(firstWorkspaceArtifactHref(slug, payload.privateWorkspace));
+      onNavigate?.();
+    } catch (err) {
+      setSpecError(err instanceof Error ? err.message : "Could not set up private workspace");
+      await loadSpecWorkspace().catch(() => setSpecWorkspace(null));
     } finally {
       setSpecPending(null);
     }
@@ -185,6 +201,7 @@ export function DocTree({ repoKey }: Props) {
           >
             {specPending === "initialize" ? "Creating..." : "Set up private workspace"}
           </button>
+          {specError && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{specError}</p>}
         </div>
       )}
     </div>
@@ -271,6 +288,7 @@ function SpecArtifactNode({
       href={specArtifactHref(repoSlug, artifact)}
       active={active}
       title={title}
+      detail={EXPORT_STATUS_LABELS[artifact.exportStatus ?? "never_exported"] ?? "Private"}
       pending={pending}
       onArchive={() => void onArchive(artifact)}
     />
@@ -281,6 +299,7 @@ function WorkspaceFileNode({
   href,
   active,
   title,
+  detail,
   pending,
   icon,
   onArchive,
@@ -288,6 +307,7 @@ function WorkspaceFileNode({
   href: string;
   active?: boolean;
   title: string;
+  detail?: string;
   pending?: boolean;
   icon?: React.ReactNode;
   onArchive?: () => void;
@@ -305,6 +325,7 @@ function WorkspaceFileNode({
           <span className="block truncate">
             {title || <span className="italic text-muted-foreground/70">Untitled</span>}
           </span>
+          {detail && <span className="shrink-0 text-[10px] text-muted-foreground/70">{detail}</span>}
         </Link>
         {onArchive && (
           <button
@@ -337,4 +358,12 @@ function specArtifactHref(
   return `/r/${slug}/workspace/${encodeURIComponent(artifact.type)}/${encodeURIComponent(
     artifact.id,
   )}`;
+}
+
+function firstWorkspaceArtifactHref(slug: string, workspace: SpecWorkspacePayload) {
+  const artifact = workspace.sections
+    .flatMap((section) => section.artifacts)
+    .find((item) => item.status !== "archived");
+
+  return artifact ? specArtifactHref(slug, artifact) : `/r/${slug}`;
 }

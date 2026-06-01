@@ -27,6 +27,10 @@ defmodule SymphoniaService.Access.AuditLog do
     artifactId
     revisionId
     exportStatus
+    exportId
+    targetPath
+    pullRequestNumber
+    pullRequestState
     legacyRepoPath
     evidenceKind
     evidenceId

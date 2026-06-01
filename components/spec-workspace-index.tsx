@@ -47,6 +47,15 @@ const SECTION_ICONS: Record<string, typeof FileText> = {
   "Task briefs": FileText,
 };
 
+const EXPORT_STATUS_LABELS: Record<string, string> = {
+  never_exported: "Private",
+  linked: "Linked",
+  changed_since_export: "Changed since export",
+  pr_open: "PR open",
+  conflict: "Conflict",
+  unlinked: "Unlinked",
+};
+
 export function SpecWorkspaceIndex({ repoKey }: { repoKey: string }) {
   const repoSlug = repoKey.toLowerCase();
   const [workspace, setWorkspace] = useState<SpecWorkspacePayload | null>(null);
@@ -421,6 +430,7 @@ function ArtifactLink({
 }) {
   const isPrivate = artifact.metadata.private === true;
   const isPrivateWorkspace = artifact.path.startsWith("private-workspace/");
+  const exportLabel = EXPORT_STATUS_LABELS[artifact.exportStatus ?? "never_exported"] ?? "Private";
 
   return (
     <Link
@@ -439,8 +449,17 @@ function ArtifactLink({
           </h3>
         </div>
         {(isPrivate || isPrivateWorkspace) && (
-          <span className="rounded-full border border-emerald-500/30 px-2 py-0.5 text-[10px] font-medium uppercase text-emerald-300">
-            Private
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase",
+              artifact.exportStatus === "conflict"
+                ? "border-amber-500/30 text-amber-300"
+                : artifact.exportStatus === "pr_open"
+                  ? "border-sky-500/30 text-sky-300"
+                  : "border-emerald-500/30 text-emerald-300",
+            )}
+          >
+            {exportLabel}
           </span>
         )}
       </div>

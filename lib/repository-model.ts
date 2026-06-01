@@ -1,3 +1,5 @@
+import type { PullRequestState, WorkspaceArtifactExportStatus } from "@/lib/export-model";
+
 export interface WorkspaceState {
   initialized: boolean;
   missingDirectories: string[];
@@ -48,13 +50,18 @@ export interface SpecArtifact {
   updatedAt?: string;
   path: string;
   latestRevisionId?: string;
-  exportStatus?:
-    | "never_exported"
-    | "linked"
-    | "changed_since_export"
-    | "pr_open"
-    | "conflict"
-    | "unlinked";
+  exportStatus?: WorkspaceArtifactExportStatus;
+  exportId?: string;
+  exportTargetPath?: string;
+  targetPath?: string;
+  targetRepo?: string;
+  baseBranch?: string;
+  exportBranch?: string;
+  exportedRevisionId?: string;
+  lastExportedAt?: string;
+  pullRequestUrl?: string;
+  pullRequestNumber?: number;
+  pullRequestState?: PullRequestState;
   legacyRepoPath?: string;
   reviewBranch?: string;
   githubPrUrl?: string;
@@ -67,6 +74,7 @@ export interface SpecArtifact {
     updated_at?: string;
     source?: string;
     latest_revision_id?: string;
+    revisions?: Array<{ id?: string; created_at?: string }>;
     export_status?: string;
     legacy_repo_path?: string;
     review_branch?: string;

@@ -20,6 +20,7 @@ defmodule SymphoniaService.HTTPServer do
   alias SymphoniaService.CodingAssistant.ProviderCatalog
   alias SymphoniaService.GitHub.{Auth, PullRequests, Repositories, RepositoryLink, Sync}
   alias SymphoniaService.Harness.{Automation, Daemon, Eligibility}
+  alias SymphoniaService.PrivateWorkspace.{ExportPreview, ExportStore, GitHubExporter}
   alias SymphoniaService.Readiness.{RepositoryReadiness, RepositoryScanner, SetupActions}
 
   alias SymphoniaService.Runners.{
@@ -310,9 +311,23 @@ defmodule SymphoniaService.HTTPServer do
       ["api", "repositories", repo, "private-workspace", "artifacts", kind, id] ->
         repository = RepositoryRegistry.get!(registry_path, repo)
 
-        guarded_read(registry_path, actor, repository, "repository.view", fn ->
+        guarded_read(registry_path, actor, repository, "private_workspace.read", fn ->
           private_repository = private_repository(repository, registry_path)
           {200, %{"artifact" => PrivateWorkspace.read_artifact(private_repository, kind, id)}}
+        end)
+
+      ["api", "repositories", repo, "private-workspace", "artifacts", kind, id, "exports"] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded_read(registry_path, actor, repository, "private_workspace.read", fn ->
+          private_repository = private_repository(repository, registry_path)
+
+          exports =
+            private_repository
+            |> ExportStore.list_for_artifact(kind, id)
+            |> Enum.map(&ExportStore.public/1)
+
+          {200, %{"exports" => exports}}
         end)
 
       ["api", "repositories", repo, "private-workspace", "legacy"] ->
@@ -1052,18 +1067,135 @@ defmodule SymphoniaService.HTTPServer do
           registry_path,
           actor,
           repository,
-          "repository.configure",
+          "private_workspace.export",
+          private_workspace_target(kind, id),
+          fn ->
+            {400,
+             %{
+               "error" =>
+                 "Use the GitHub export preview and open-pr endpoints to export private artifacts."
+             }}
+          end,
+          %{"artifactKind" => kind, "artifactId" => id},
+          "private_workspace.export_denied"
+        )
+
+      [
+        "api",
+        "repositories",
+        repo,
+        "private-workspace",
+        "artifacts",
+        kind,
+        id,
+        "export",
+        "github",
+        "preview"
+      ] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        payload = decode_json(body)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "private_workspace.read",
           private_workspace_target(kind, id),
           fn ->
             private_repository = private_repository(repository, registry_path)
-
-            artifact =
-              PrivateWorkspace.export_artifact(private_repository, kind, id, decode_json(body))
-
-            {200, %{"artifact" => artifact}}
+            preview = ExportPreview.preview(private_repository, kind, id, payload)
+            {200, %{"preview" => preview}}
           end,
-          %{"artifactKind" => kind, "artifactId" => id},
-          "private_workspace.artifact_exported"
+          export_audit_metadata(kind, id, payload),
+          "private_workspace.export_previewed"
+        )
+
+      [
+        "api",
+        "repositories",
+        repo,
+        "private-workspace",
+        "artifacts",
+        kind,
+        id,
+        "export",
+        "github",
+        "open-pr"
+      ] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+        payload = decode_json(body)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "private_workspace.export",
+          private_workspace_target(kind, id),
+          fn ->
+            private_repository = private_repository(repository, registry_path)
+            result = GitHubExporter.open_pr(private_repository, kind, id, payload)
+            {200, result}
+          end,
+          export_audit_metadata(kind, id, payload),
+          "private_workspace.export_pr_opened"
+        )
+
+      [
+        "api",
+        "repositories",
+        repo,
+        "private-workspace",
+        "artifacts",
+        kind,
+        id,
+        "exports",
+        export_id,
+        "refresh"
+      ] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "pull_request.refresh",
+          private_workspace_target(kind, id),
+          fn ->
+            private_repository = private_repository(repository, registry_path)
+            result = GitHubExporter.refresh(private_repository, kind, id, export_id)
+            {200, result}
+          end,
+          %{"artifactKind" => kind, "artifactId" => id, "exportId" => export_id},
+          "private_workspace.export_refreshed"
+        )
+
+      [
+        "api",
+        "repositories",
+        repo,
+        "private-workspace",
+        "artifacts",
+        kind,
+        id,
+        "exports",
+        export_id,
+        "unlink"
+      ] ->
+        repository = RepositoryRegistry.get!(registry_path, repo)
+
+        guarded(
+          registry_path,
+          actor,
+          repository,
+          "private_workspace.export",
+          private_workspace_target(kind, id),
+          fn ->
+            private_repository = private_repository(repository, registry_path)
+            result = GitHubExporter.unlink(private_repository, kind, id, export_id)
+            {200, result}
+          end,
+          %{"artifactKind" => kind, "artifactId" => id, "exportId" => export_id},
+          "private_workspace.export_unlinked"
         )
 
       ["api", "repositories", repo, "pages"] ->
@@ -1721,12 +1853,13 @@ defmodule SymphoniaService.HTTPServer do
       :ok ->
         try do
           {status, payload} = fun.()
+          result = if status in 200..299, do: "completed", else: "failed"
 
           AuditLog.record(registry_path, repository, %{
             "actor" => actor,
             "action" => audit_action || permission,
             "target" => target,
-            "result" => "completed",
+            "result" => result,
             "metadata" => metadata
           })
 
@@ -1844,6 +1977,21 @@ defmodule SymphoniaService.HTTPServer do
   end
 
   defp secret_reference_metadata(_attrs), do: %{}
+
+  defp export_audit_metadata(kind, id, attrs) when is_map(attrs) do
+    %{
+      "artifactKind" => kind,
+      "artifactId" => id,
+      "provider" => "github",
+      "targetPath" => attrs["targetPath"] || attrs["target_path"],
+      "reasonCode" => attrs["reasonCode"] || attrs["reason_code"]
+    }
+    |> reject_nil()
+  end
+
+  defp export_audit_metadata(kind, id, _attrs) do
+    %{"artifactKind" => kind, "artifactId" => id, "provider" => "github"}
+  end
 
   defp runner_lifecycle_error(:local_service_immutable, runner_id) do
     {400,

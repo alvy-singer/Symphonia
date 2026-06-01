@@ -48,7 +48,7 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
 
   assert.match(sidebar, /label="Clarise"/);
   assert.match(sidebar, /href=\{`\/r\/\$\{t\.key\.toLowerCase\(\)\}`\}/);
-  assert.match(sidebar, /<DocTree repoKey=\{repoKey\} \/>/);
+  assert.match(sidebar, /<DocTree repoKey=\{repoKey\} onNavigate=\{handleNav\} \/>/);
   assert.doesNotMatch(sidebar, /Document tree menu/);
   assert.doesNotMatch(sidebar, /Open document tree/);
   assert.doesNotMatch(sidebar, /Close document tree/);
@@ -71,6 +71,11 @@ test("repo opening lands on the Clarise repo home, not tasks or workspace", asyn
   assert.doesNotMatch(docTree, /aria-label="New page"/);
   assert.doesNotMatch(docTree, /aria-label="Open trash"/);
   assert.doesNotMatch(docTree, /tabular-nums[\s\S]*artifacts\.length/);
+  assert.match(docTree, /router\.push\(firstWorkspaceArtifactHref\(slug, payload\.privateWorkspace\)\)/);
+  assert.match(docTree, /symphonia:specWorkspaceChanged/);
+  assert.match(docTree, /onNavigate\?\.\(\)/);
+  assert.match(docTree, /specError/);
+  assert.match(docTree, /function firstWorkspaceArtifactHref/);
 
   assert.match(palette, /id: "nav-clarise"/);
   assert.match(palette, /id: "nav-workflow"/);
@@ -168,6 +173,29 @@ test("run progress SSE stays bounded and off the task board", async () => {
   assert.match(taskPage, /new EventSource/);
   assert.doesNotMatch(tasksView, /EventSource/);
   assert.doesNotMatch(tasksView, /fetchCodingAssistantRunEvents/);
+});
+
+test("private artifact GitHub export remains manual and PR-gated", async () => {
+  const editor = await source("components/spec-artifact-editor.tsx");
+  const previewRoute = await source(
+    "app/api/repositories/[repoKey]/private-workspace/artifacts/[artifactType]/[artifactId]/export/github/preview/route.ts",
+  );
+  const openPrRoute = await source(
+    "app/api/repositories/[repoKey]/private-workspace/artifacts/[artifactType]/[artifactId]/export/github/open-pr/route.ts",
+  );
+
+  assert.match(editor, /This will publish the selected private artifact revision to GitHub through a pull request/);
+  assert.match(editor, /Future private edits will not sync automatically/);
+  assert.match(editor, /This will open a new PR updating the linked GitHub file/);
+  assert.match(editor, /Preview Markdown/);
+  assert.match(editor, /Open PR/);
+  assert.match(editor, /Update GitHub copy/);
+  assert.doesNotMatch(editor, /silent sync/i);
+  assert.doesNotMatch(editor, /direct default branch/i);
+
+  assert.match(previewRoute, /export\/github\/preview/);
+  assert.match(openPrRoute, /export\/github\/open-pr/);
+  assert.doesNotMatch(openPrRoute, /\/export`/);
 });
 
 test("assistant-ui dependencies and React peer range are installed intentionally", async () => {

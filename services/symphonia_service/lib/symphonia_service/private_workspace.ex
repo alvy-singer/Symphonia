@@ -7,6 +7,7 @@ defmodule SymphoniaService.PrivateWorkspace do
   """
 
   alias SymphoniaService.Markdown
+  alias SymphoniaService.PrivateWorkspace.{ExportStatus, ExportStore}
   alias SymphoniaService.Secrets.Redactor
   alias SymphoniaService.SpecWorkspace.Templates
   alias SymphoniaService.Validation.Evidence
@@ -152,6 +153,21 @@ defmodule SymphoniaService.PrivateWorkspace do
       nil -> raise ArgumentError, "Artifact not found."
       metadata -> artifact_from_metadata(repository, metadata, opts)
     end
+  end
+
+  def read_revision(repository, kind, id, revision_id, opts \\ []) do
+    validate_artifact_kind!(kind)
+    validate_id!(id)
+    validate_id!(revision_id)
+
+    artifact = read_artifact(repository, kind, id, opts)
+    revision_ids = artifact["metadata"]["revisions"] |> List.wrap() |> Enum.map(& &1["id"])
+
+    unless revision_id in revision_ids do
+      raise ArgumentError, "Private workspace revision not found."
+    end
+
+    read_revision_blob(repository, kind, id, revision_id, opts)
   end
 
   def create_artifact(repository, kind, attrs \\ %{}, opts \\ []) do
@@ -420,25 +436,59 @@ defmodule SymphoniaService.PrivateWorkspace do
         opts
       )
 
-    %{
-      "type" => metadata["kind"],
-      "kind" => metadata["kind"],
-      "id" => metadata["id"],
-      "title" => metadata["title"],
-      "status" => metadata["status"],
-      "source" => metadata["source"],
-      "createdAt" => metadata["created_at"],
-      "updatedAt" => metadata["updated_at"],
-      "path" => "private-workspace/#{metadata["kind"]}/#{metadata["id"]}",
-      "latestRevisionId" => metadata["latest_revision_id"],
-      "exportStatus" => metadata["export_status"],
-      "legacyRepoPath" => metadata["legacy_repo_path"],
-      "reviewBranch" => metadata["review_branch"],
-      "githubPrUrl" => metadata["github_pr_url"],
-      "metadata" => public_metadata(metadata),
-      "body" => body
-    }
-    |> reject_nil()
+    exports = ExportStore.list_for_artifact(repository, metadata["kind"], metadata["id"], opts)
+
+    latest_export =
+      ExportStore.latest_for_artifact(repository, metadata["kind"], metadata["id"], opts)
+
+    artifact =
+      %{
+        "type" => metadata["kind"],
+        "kind" => metadata["kind"],
+        "id" => metadata["id"],
+        "title" => metadata["title"],
+        "status" => metadata["status"],
+        "source" => metadata["source"],
+        "createdAt" => metadata["created_at"],
+        "updatedAt" => metadata["updated_at"],
+        "path" => "private-workspace/#{metadata["kind"]}/#{metadata["id"]}",
+        "latestRevisionId" => metadata["latest_revision_id"],
+        "legacyRepoPath" => metadata["legacy_repo_path"],
+        "reviewBranch" => metadata["review_branch"],
+        "githubPrUrl" => metadata["github_pr_url"],
+        "metadata" => public_metadata(metadata),
+        "body" => body
+      }
+      |> put_export_projection(metadata, latest_export, exports)
+      |> reject_nil()
+
+    artifact
+  end
+
+  defp put_export_projection(artifact, metadata, nil, exports) do
+    Map.put(
+      artifact,
+      "exportStatus",
+      ExportStatus.derive(artifact, exports, metadata["export_status"])
+    )
+  end
+
+  defp put_export_projection(artifact, metadata, export, exports) do
+    artifact
+    |> Map.put("exportStatus", ExportStatus.derive(artifact, exports, metadata["export_status"]))
+    |> Map.put("exportId", export["id"])
+    |> Map.put("exportTargetPath", export["target_path"])
+    |> Map.put("targetPath", export["target_path"])
+    |> Map.put("targetRepo", export["target_repo"])
+    |> Map.put("baseBranch", export["base_branch"])
+    |> Map.put("reviewBranch", export["export_branch"] || metadata["review_branch"])
+    |> Map.put("exportBranch", export["export_branch"])
+    |> Map.put("exportedRevisionId", export["exported_revision_id"])
+    |> Map.put("lastExportedAt", export["last_exported_at"])
+    |> Map.put("githubPrUrl", export["pull_request_url"] || metadata["github_pr_url"])
+    |> Map.put("pullRequestUrl", export["pull_request_url"])
+    |> Map.put("pullRequestNumber", export["pull_request_number"])
+    |> Map.put("pullRequestState", export["pull_request_state"])
   end
 
   defp evidence_from_metadata(repository, metadata, opts) do

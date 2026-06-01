@@ -7,6 +7,8 @@ defmodule SymphoniaService.Access.Permission do
     "repository.view",
     "repository.configure",
     "workspace.initialize",
+    "private_workspace.read",
+    "private_workspace.export",
     "workflow.update",
     "automation.enable",
     "automation.disable",
@@ -65,6 +67,7 @@ defmodule SymphoniaService.Access.Permission do
     "reviewer" =>
       MapSet.new([
         "repository.view",
+        "private_workspace.read",
         "review.approve",
         "review.request_changes",
         "pull_request.refresh",
@@ -74,6 +77,7 @@ defmodule SymphoniaService.Access.Permission do
     "operator" =>
       MapSet.new([
         "repository.view",
+        "private_workspace.read",
         "harness.pause",
         "harness.resume",
         "harness.tick",
@@ -83,13 +87,21 @@ defmodule SymphoniaService.Access.Permission do
         "pull_request.refresh",
         "runner.view"
       ]),
-    "viewer" => MapSet.new(["repository.view", "runner.view", "secret_reference.view"])
+    "viewer" =>
+      MapSet.new([
+        "repository.view",
+        "private_workspace.read",
+        "runner.view",
+        "secret_reference.view"
+      ])
   }
 
   @labels %{
     "repository.view" => "view this repository",
     "repository.configure" => "configure this repository",
     "workspace.initialize" => "initialize workspace files",
+    "private_workspace.read" => "read private workspace artifacts",
+    "private_workspace.export" => "export private workspace artifacts",
     "workflow.update" => "update workflow settings",
     "automation.enable" => "enable automation",
     "automation.disable" => "disable automation",
@@ -128,6 +140,8 @@ defmodule SymphoniaService.Access.Permission do
   @denials %{
     "pull_request.open" =>
       "You do not have permission to open pull requests for this repository.",
+    "private_workspace.export" =>
+      "You do not have permission to export private workspace artifacts for this repository.",
     "review.approve" => "You do not have permission to approve handoffs for this repository.",
     "review.request_changes" =>
       "You do not have permission to request changes for this repository.",
@@ -147,8 +161,7 @@ defmodule SymphoniaService.Access.Permission do
       "You do not have permission to run experimental sandbox workspaces for this repository.",
     "sandbox.configure" =>
       "You do not have permission to configure sandbox execution for this repository.",
-    "sandbox.run" =>
-      "You do not have permission to run sandbox execution for this repository.",
+    "sandbox.run" => "You do not have permission to run sandbox execution for this repository.",
     "runner.register" => "You do not have permission to register runners for this repository.",
     "runner.pair" => "You do not have permission to pair runners for this repository.",
     "runner.approve" => "You do not have permission to approve runners for this repository.",
@@ -157,7 +170,8 @@ defmodule SymphoniaService.Access.Permission do
     "runner.revoke" => "You do not have permission to revoke runners for this repository.",
     "runner.rotate_token" =>
       "You do not have permission to rotate runner tokens for this repository.",
-    "runner.use_remote" => "You do not have permission to use remote runners for this repository.",
+    "runner.use_remote" =>
+      "You do not have permission to use remote runners for this repository.",
     "secret_reference.create" =>
       "You do not have permission to create secret references for this repository.",
     "secret_reference.delete" =>

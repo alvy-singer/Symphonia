@@ -59,6 +59,29 @@ defmodule SymphoniaService.GitHub.Client do
     api(:get, "/repos/#{encode(owner)}/#{encode(repo)}/branches/#{encode(branch)}", token)
   end
 
+  def create_git_ref(token, owner, repo, payload) do
+    api(:post, "/repos/#{encode(owner)}/#{encode(repo)}/git/refs", token, payload)
+  end
+
+  def get_contents(token, owner, repo, path, ref) do
+    query = if ref, do: "?ref=#{URI.encode_www_form(to_string(ref))}", else: ""
+
+    api(
+      :get,
+      "/repos/#{encode(owner)}/#{encode(repo)}/contents/#{encode_path(path)}#{query}",
+      token
+    )
+  end
+
+  def put_contents(token, owner, repo, path, payload) do
+    api(
+      :put,
+      "/repos/#{encode(owner)}/#{encode(repo)}/contents/#{encode_path(path)}",
+      token,
+      payload
+    )
+  end
+
   def create_pull_request(token, owner, repo, payload) do
     api(:post, "/repos/#{encode(owner)}/#{encode(repo)}/pulls", token, payload)
   end
@@ -151,4 +174,11 @@ defmodule SymphoniaService.GitHub.Client do
   end
 
   defp encode(value), do: URI.encode(to_string(value), &URI.char_unreserved?/1)
+
+  defp encode_path(path) do
+    path
+    |> to_string()
+    |> String.split("/", trim: true)
+    |> Enum.map_join("/", &encode/1)
+  end
 end
