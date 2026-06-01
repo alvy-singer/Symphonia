@@ -109,6 +109,7 @@ export function DocTree({ repoKey, onNavigate }: Props) {
       }
       setSpecWorkspace(payload.privateWorkspace);
       window.dispatchEvent(new CustomEvent("symphonia:specWorkspaceChanged", { detail: { repoKey } }));
+      window.dispatchEvent(new CustomEvent("symphonia:workspaceInitialized", { detail: { repoKey } }));
       router.push(firstWorkspaceArtifactHref(slug, payload.privateWorkspace));
       onNavigate?.();
     } catch (err) {
@@ -195,6 +196,7 @@ export function DocTree({ repoKey, onNavigate }: Props) {
         <div className="rounded-md border border-dashed px-2 py-2">
           <p className="text-[11px] text-muted-foreground">Set up private workspace files for this repository.</p>
           <button
+            id="setup-private-workspace-button"
             onClick={initializeSpecWorkspace}
             disabled={specPending === "initialize"}
             className="mt-2 rounded-md border bg-background px-2 py-1 text-[11px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"

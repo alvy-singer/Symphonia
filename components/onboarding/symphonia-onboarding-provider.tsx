@@ -9,9 +9,10 @@ import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "symphonia.onboarding.v1";
 
-type TourName = "first-task" | "first-codex-review";
+type TourName = "setup-workspace" | "first-task" | "first-codex-review";
 
 interface RepoOnboardingState {
+  hasSetUpWorkspace: boolean;
   hasCreatedFirstTask: boolean;
   hasStartedFirstCodexRun: boolean;
   hasReviewedFirstHandoff: boolean;
@@ -33,6 +34,7 @@ type OnbordaTour = {
 };
 
 const emptyRepoState: RepoOnboardingState = {
+  hasSetUpWorkspace: false,
   hasCreatedFirstTask: false,
   hasStartedFirstCodexRun: false,
   hasReviewedFirstHandoff: false,
@@ -42,6 +44,21 @@ const emptyRepoState: RepoOnboardingState = {
 const defaultState: OnboardingState = { repos: {} };
 
 const tours: OnbordaTour[] = [
+  {
+    tour: "setup-workspace",
+    steps: [
+      {
+        icon: <Check className="h-3.5 w-3.5" />,
+        title: "Set up your private workspace",
+        content:
+          "Start here. Set up this repository's private workspace — it's where Clarise stores your milestones, plans, and decisions as private Markdown artifacts. Nothing is pushed to the repo until you choose to export it.",
+        selector: "#setup-private-workspace-button",
+        side: "right",
+        pointerPadding: 10,
+        pointerRadius: 8,
+      },
+    ],
+  },
   {
     tour: "first-task",
     steps: [
@@ -161,6 +178,7 @@ function OnboardingSurface({ children }: { children: ReactNode }) {
     <Onborda
       steps={tours}
       cardComponent={SymphoniaOnboardingCard}
+      interact
       shadowRgb="17, 24, 39"
       shadowOpacity="0.34"
       cardTransition={{ duration: 0.22, type: "tween" }}
@@ -238,6 +256,15 @@ function OnboardingController({ children }: { children: ReactNode }) {
     const dismissed = repo.dismissedTours ?? {};
 
     if (
+      !repo.hasSetUpWorkspace &&
+      !dismissed["setup-workspace"] &&
+      selectorExists("#setup-private-workspace-button")
+    ) {
+      startTourAt("setup-workspace", 0);
+      return;
+    }
+
+    if (
       !repo.hasCreatedFirstTask &&
       !dismissed["first-task"] &&
       selectorExists("#create-first-task-button")
@@ -283,6 +310,14 @@ function OnboardingController({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!loaded) return;
+
+    const markWorkspaceSetUp = (event: Event) => {
+      const detail = (event as CustomEvent<{ repoKey?: string }>).detail;
+      const repoKey = detail?.repoKey?.toUpperCase() ?? repoKeyFromPath(pathname);
+      if (!repoKey) return;
+      updateRepo(repoKey, (repo) => ({ ...repo, hasSetUpWorkspace: true }));
+      closeOnborda();
+    };
 
     const markTaskCreated = (event: Event) => {
       const detail = (event as CustomEvent<{ repoKey?: string }>).detail;
@@ -332,12 +367,14 @@ function OnboardingController({ children }: { children: ReactNode }) {
       closeOnborda();
     };
 
+    window.addEventListener("symphonia:workspaceInitialized", markWorkspaceSetUp as EventListener);
     window.addEventListener("symphonia:taskCreated", markTaskCreated as EventListener);
     window.addEventListener("symphonia:codexRunStarted", markCodexStarted as EventListener);
     window.addEventListener("symphonia:taskHandoffViewed", markHandoffViewed as EventListener);
     window.addEventListener("symphonia:onboarding:dismiss", dismissTour as EventListener);
 
     return () => {
+      window.removeEventListener("symphonia:workspaceInitialized", markWorkspaceSetUp as EventListener);
       window.removeEventListener("symphonia:taskCreated", markTaskCreated as EventListener);
       window.removeEventListener("symphonia:codexRunStarted", markCodexStarted as EventListener);
       window.removeEventListener("symphonia:taskHandoffViewed", markHandoffViewed as EventListener);

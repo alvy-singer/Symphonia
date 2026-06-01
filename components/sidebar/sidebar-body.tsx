@@ -372,6 +372,7 @@ function WorkspaceDocumentCreateMenu({
       <PopoverTrigger asChild>
         <button
           type="button"
+          id="workspace-create-document-button"
           aria-label="New workspace document"
           title="New workspace document"
           className="grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
