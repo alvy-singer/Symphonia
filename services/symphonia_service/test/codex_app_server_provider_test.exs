@@ -605,8 +605,9 @@ defmodule SymphoniaService.CodexAppServerProviderTest do
     assert turn_start["params"]["cwd"] == run["workspace_path"]
 
     [%{"text" => prompt}] = turn_start["params"]["input"]
-    assert prompt =~ "Workspace path: #{run["workspace_path"]}"
-    refute prompt =~ "Workspace path: #{review_path}"
+    assert prompt =~ "Workspace provider: experimental_sandbox"
+    refute prompt =~ run["workspace_path"]
+    refute prompt =~ review_path
 
     branch_files =
       git_output!([

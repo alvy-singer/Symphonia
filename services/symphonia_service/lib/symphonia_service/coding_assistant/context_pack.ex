@@ -46,7 +46,7 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
     Repository: #{pack["workspace"]["repository"]}
     Base branch: #{pack["workspace"]["baseBranch"]}
     Head branch: #{pack["workspace"]["headBranch"]}
-    Workspace path: #{pack["workspace"]["path"]}
+    Workspace provider: #{pack["workspace"]["provider"] || "local"}
 
     Task brief:
     #{pack["task"]["brief"]}
@@ -242,7 +242,6 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
       "repository" => repository["name"] || repository["key"],
       "baseBranch" => context_value(context, :base_branch),
       "headBranch" => context_value(context, :head_branch),
-      "path" => context_value(context, :repo_path),
       "persistent" => context_value(context, :persistent) == true,
       "provider" => context_value(context, :workspace_provider)
     }
@@ -287,11 +286,10 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
 
   defp continuation_section(_pack), do: ""
 
-  defp previous_review_section(pack, mode) do
+  defp previous_review_section(pack, _mode) do
     [
       previous_handoff_section(pack["previousHandoff"]),
-      review_notes_section(pack["reviewNotes"]),
-      thread_section(pack["existingCodexThreadId"], mode)
+      review_notes_section(pack["reviewNotes"])
     ]
     |> Enum.reject(&blank?/1)
     |> case do
@@ -320,10 +318,6 @@ defmodule SymphoniaService.CodingAssistant.ContextPack do
 
   defp review_notes_section(nil), do: nil
   defp review_notes_section(notes), do: "Review notes:\n#{notes}"
-
-  defp thread_section(_thread_id, :gemini_cli), do: nil
-  defp thread_section(nil, _mode), do: nil
-  defp thread_section(thread_id, _mode), do: "Existing Codex thread ID: #{thread_id}"
 
   defp markdown_list([], fallback), do: fallback
 

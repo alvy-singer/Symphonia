@@ -186,17 +186,18 @@ defmodule SymphoniaService.ContextPackTest do
     assert prompt =~ "Harness requirements"
     assert prompt =~ "Harness plan"
     assert prompt =~ "Codex only"
-    assert prompt =~ "Existing Codex thread ID: thread-private"
+    assert prompt =~ "Workspace provider: local_git_worktree"
     assert prompt =~ "Previous handoff:"
     assert prompt =~ "Previous handoff summary."
     assert prompt =~ "app/previous-output.txt"
     assert prompt =~ "Review notes:"
     assert prompt =~ "Requested changes:"
     assert prompt =~ "- Keep the stream observer bounded."
-    assert prompt =~ repository["path"]
-
     refute prompt =~ "Unlinked plan"
     refute prompt =~ "Draft milestone"
+    refute prompt =~ repository["path"]
+    refute prompt =~ "Existing Codex thread ID"
+    refute prompt =~ "thread-private"
     refute prompt =~ "raw reviewer complaint"
     refute prompt =~ "Older private handoff detail"
     refute prompt =~ "turn-private"
@@ -238,14 +239,20 @@ defmodule SymphoniaService.ContextPackTest do
           "Harness plan",
           "Codex only",
           "Previous handoff summary.",
-          "Review notes:",
-          "Existing Codex thread ID: thread-private"
+          "Review notes:"
         ] do
       assert app_server_prompt =~ shared
       assert codex_prompt =~ shared
     end
 
-    for private <- ["Unlinked plan", "Draft milestone", "turn-private", "raw transcript secret"] do
+    for private <- [
+          "Unlinked plan",
+          "Draft milestone",
+          "thread-private",
+          "turn-private",
+          "raw transcript secret",
+          repository["path"]
+        ] do
       refute app_server_prompt =~ private
       refute codex_prompt =~ private
     end

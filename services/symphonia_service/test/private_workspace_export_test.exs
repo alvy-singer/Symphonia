@@ -3,6 +3,7 @@ defmodule SymphoniaService.PrivateWorkspaceExportTest do
 
   alias SymphoniaService.GitHub.InstallationStore
   alias SymphoniaService.PrivateWorkspace
+  alias SymphoniaService.Privacy.Inventory
 
   alias SymphoniaService.PrivateWorkspace.{
     ExportPreview,
@@ -53,6 +54,10 @@ defmodule SymphoniaService.PrivateWorkspaceExportTest do
       refute markdown =~ "/Users/local"
       refute markdown =~ "provider output"
       refute markdown =~ "thread_id"
+
+      for value <- SymphoniaService.Privacy.Inventory.risky_values() do
+        refute markdown =~ value
+      end
 
       {:ok, %{"content" => %{"sha" => "branch-file-sha"}}}
     end
@@ -159,6 +164,7 @@ defmodule SymphoniaService.PrivateWorkspaceExportTest do
         provider output should stay private.
         thread_id: abc123
         Local path: /Users/local/repo
+        #{Enum.join(Inventory.risky_values(), "\n")}
         """
       })
 
@@ -179,6 +185,10 @@ defmodule SymphoniaService.PrivateWorkspaceExportTest do
     refute markdown =~ "provider output"
     refute markdown =~ "thread_id"
     refute markdown =~ "/Users/local"
+
+    for value <- Inventory.risky_values() do
+      refute markdown =~ value
+    end
   end
 
   test "preview validates path policy and does not persist exports", %{

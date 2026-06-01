@@ -471,7 +471,7 @@ defmodule SymphoniaService.CodingAssistantTest do
       )
 
     assert detail["run"]["state"] == "running"
-    assert detail["run"]["currentStep"] == "Running Coding Assistant"
+    assert detail["run"]["currentStep"] == "Starting Codex"
     assert detail["run"]["displayStep"] == "Starting Codex"
     refute Map.has_key?(detail["run"], "workspacePath")
     refute Map.has_key?(detail["run"], "codexThreadId")

@@ -4,6 +4,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
   """
 
   alias SymphoniaService.CodingAssistant.RunEvents
+  alias SymphoniaService.Secrets.Redactor
 
   @states ~w(queued running completed failed canceled)
 
@@ -142,7 +143,7 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "state" => run["state"],
       "provider" => run["provider"],
       "label" => RunEvents.label(run["state"]),
-      "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
+      "currentStep" => RunEvents.display_step(run),
       "message" => RunEvents.public_message(run),
       "displayStep" => RunEvents.display_step(run),
       "displayMessage" => RunEvents.display_message(run),
@@ -152,9 +153,9 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "assignmentId" => run["assignment_id"],
       "workspaceProvider" => run["workspace_provider"],
       "cleanupWarning" => run["cleanup_warning"],
-      "reviewBranch" => run["review_branch"],
-      "curatedSummaryId" => run["curated_summary_id"],
-      "curatedSummaryPath" => run["curated_summary_path"],
+      "reviewBranch" => public_text(run["review_branch"]),
+      "curatedSummaryId" => public_text(run["curated_summary_id"]),
+      "curatedSummaryPath" => public_text(run["curated_summary_path"]),
       "evidenceIds" => run["evidence_ids"],
       "retryAt" => run["retry_at"],
       "failureClass" => run["failure_class"],
@@ -174,11 +175,16 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
     |> Enum.filter(&is_map/1)
     |> Enum.with_index(1)
     |> Enum.map(fn {event, index} ->
+      event_run = %{
+        "state" => progress_event_state(run, event),
+        "current_step" => event["label"] || run["current_step"]
+      }
+
       %{
         "id" => progress_event_id(run, index),
         "event" => "run-progress",
         "at" => event["at"],
-        "label" => event["label"]
+        "label" => RunEvents.display_step(event_run)
       }
       |> reject_nil()
     end)
@@ -341,9 +347,9 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
       "state" => event_run["state"],
       "displayStep" => RunEvents.display_step(event_run),
       "displayMessage" => RunEvents.display_message(event_run),
-      "reviewBranch" => run["review_branch"],
-      "curatedSummaryId" => run["curated_summary_id"],
-      "curatedSummaryPath" => run["curated_summary_path"],
+      "reviewBranch" => public_text(run["review_branch"]),
+      "curatedSummaryId" => public_text(run["curated_summary_id"]),
+      "curatedSummaryPath" => public_text(run["curated_summary_path"]),
       "evidenceIds" => run["evidence_ids"],
       "updatedAt" => event["at"] || run["updated_at"]
     }
@@ -363,6 +369,15 @@ defmodule SymphoniaService.CodingAssistant.RunStore do
   defp progress_event_state(%{"state" => state}, _event), do: state || "running"
 
   defp progress_event_id(run, index), do: "#{run["id"]}:#{index}"
+
+  defp public_text(value) when is_binary(value) do
+    case Redactor.sanitize_value(value) do
+      :drop -> nil
+      value -> value
+    end
+  end
+
+  defp public_text(_value), do: nil
 
   defp run_id do
     suffix = :crypto.strong_rand_bytes(6) |> Base.url_encode64(padding: false)

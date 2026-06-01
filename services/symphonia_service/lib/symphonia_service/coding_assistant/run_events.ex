@@ -3,6 +3,8 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
   Curated public labels and steps for Coding Assistant runs.
   """
 
+  alias SymphoniaService.Secrets.Redactor
+
   @labels %{
     "queued" => "Queued",
     "running" => "Working",
@@ -72,7 +74,7 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
     run
     |> Map.get("current_step")
     |> case do
-      step when is_binary(step) -> Map.get(@display_steps, step, step)
+      step when is_binary(step) -> Map.get(@display_steps, step, default_step(run["state"]))
       _ -> default_step(run["state"])
     end
   end
@@ -121,12 +123,24 @@ defmodule SymphoniaService.CodingAssistant.RunEvents do
   def display_message(_run), do: nil
 
   def public_message(%{"state" => "canceled"} = run) do
-    run["message"] || "Run canceled. The task is paused. You can retry when ready."
+    safe_public_text(
+      run["message"],
+      "Run canceled. The task is paused. You can retry when ready."
+    )
   end
 
   def public_message(%{"state" => "failed"} = run) do
-    run["message"] || "The Coding Assistant run failed."
+    safe_public_text(run["message"], "The Coding Assistant run failed.")
   end
 
   def public_message(_run), do: nil
+
+  defp safe_public_text(value, fallback) when is_binary(value) do
+    case Redactor.sanitize_value(value) do
+      text when is_binary(text) and text != "" -> text
+      _ -> fallback
+    end
+  end
+
+  defp safe_public_text(_value, fallback), do: fallback
 end

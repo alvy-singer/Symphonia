@@ -2,6 +2,7 @@ defmodule SymphoniaService.PrivateWorkspaceTest do
   use ExUnit.Case
 
   alias SymphoniaService.{PrivateWorkspace, RepositoryRegistry}
+  alias SymphoniaService.Privacy.Inventory
 
   setup do
     root =
@@ -136,14 +137,16 @@ defmodule SymphoniaService.PrivateWorkspaceTest do
         %{
           "label" => "Build",
           "status" => "failed",
-          "detail" => "TOKEN=secret failed at /Users/local/repo"
+          "detail" => Enum.join(Inventory.risky_values(), " ")
         }
       ])
 
     encoded_evidence = JSON.encode!(evidence)
     assert evidence["kind"] == "validation_excerpt"
-    refute encoded_evidence =~ "TOKEN=secret"
-    refute encoded_evidence =~ "/Users/local"
+
+    for value <- Inventory.risky_values() do
+      refute encoded_evidence =~ value
+    end
 
     exported = PrivateWorkspace.export_artifact(repository, "plan", artifact["id"])
     assert exported["exportStatus"] == "linked"

@@ -3,6 +3,8 @@ defmodule SymphoniaService.Validation.Evidence do
   Converts private validation results into review-safe public evidence.
   """
 
+  alias SymphoniaService.Secrets.Redactor
+
   @not_configured_detail "No machine validation command was configured."
 
   def not_configured_result do
@@ -52,18 +54,10 @@ defmodule SymphoniaService.Validation.Evidence do
   end
 
   def sanitize_public_text(value) do
-    value
-    |> to_string()
-    |> String.trim()
-    |> String.replace(
-      ~r/(^|[\s(])\/(?:Users|private|tmp|var|Volumes|home|opt|usr)\/[^\s)]+/,
-      "\\1[local path hidden]"
-    )
-    |> String.replace(
-      ~r/\b[A-Z][A-Z0-9_]*(TOKEN|SECRET|KEY|PASSWORD)=\S+/,
-      "[environment value hidden]"
-    )
-    |> String.slice(0, 300)
+    case Redactor.sanitize_value(to_string(value)) do
+      :drop -> ""
+      text -> text |> String.trim() |> String.slice(0, 300)
+    end
   end
 
   defp public_one(result) do

@@ -33,9 +33,6 @@ export function HeroSection() {
             Connect repository
             <ArrowRight className="h-4 w-4" />
           </Link>
-          <span className="text-[14px] text-[var(--landing-muted)]">
-            Built for repository-connected teams
-          </span>
         </div>
         <HeroArtwork />
         <ProofStrip />

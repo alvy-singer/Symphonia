@@ -2,6 +2,7 @@ defmodule SymphoniaService.RunStoreTest do
   use ExUnit.Case
 
   alias SymphoniaService.CodingAssistant.RunStore
+  alias SymphoniaService.Privacy.Inventory
 
   setup do
     root =
@@ -27,6 +28,7 @@ defmodule SymphoniaService.RunStoreTest do
       )
       |> RunStore.mark_running(root: root)
       |> RunStore.mark_step("Starting Codex thread", root: root)
+      |> RunStore.mark_step(Enum.join(Inventory.risky_values(), " "), root: root)
       |> RunStore.update_metadata(
         %{
           "review_branch" => "symphonia/task/sym-1",
@@ -53,6 +55,11 @@ defmodule SymphoniaService.RunStoreTest do
     refute encoded =~ "/Users/example"
     refute encoded =~ "thread-secret"
     refute encoded =~ "turn-secret"
+
+    for value <- Inventory.risky_values() do
+      refute JSON.encode!(public) =~ value
+      refute encoded =~ value
+    end
 
     replayed = RunStore.public_progress_events(run, after: first_id)
     assert length(replayed) == length(events) - 1

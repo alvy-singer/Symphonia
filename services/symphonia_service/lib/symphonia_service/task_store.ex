@@ -5,6 +5,7 @@ defmodule SymphoniaService.TaskStore do
 
   alias SymphoniaService.{Lifecycle, Markdown, RepositoryRegistry}
   alias SymphoniaService.CodingAssistant.RunEvents
+  alias SymphoniaService.Secrets.Redactor
 
   @generated_metadata_keys ~w(
     type
@@ -452,7 +453,7 @@ defmodule SymphoniaService.TaskStore do
       "state" => run["state"],
       "provider" => run["provider"],
       "label" => RunEvents.label(run["state"]),
-      "currentStep" => run["current_step"] || RunEvents.default_step(run["state"]),
+      "currentStep" => run["display_step"] || RunEvents.display_step(run),
       "message" => RunEvents.public_message(run),
       "displayStep" => run["display_step"] || RunEvents.display_step(run),
       "displayMessage" => run["display_message"] || RunEvents.display_message(run),
@@ -462,9 +463,9 @@ defmodule SymphoniaService.TaskStore do
       "assignmentId" => run["assignment_id"],
       "workspaceProvider" => run["workspace_provider"],
       "cleanupWarning" => run["cleanup_warning"],
-      "reviewBranch" => run["review_branch"],
-      "curatedSummaryId" => run["curated_summary_id"],
-      "curatedSummaryPath" => run["curated_summary_path"],
+      "reviewBranch" => public_text(run["review_branch"]),
+      "curatedSummaryId" => public_text(run["curated_summary_id"]),
+      "curatedSummaryPath" => public_text(run["curated_summary_path"]),
       "evidenceIds" => run["evidence_ids"],
       "retryAt" => run["retry_at"],
       "failureClass" => run["failure_class"],
@@ -495,10 +496,10 @@ defmodule SymphoniaService.TaskStore do
       "summary" => handoff["summary"],
       "filesChanged" => List.wrap(handoff["files_changed"]) |> Enum.reject(&is_nil/1),
       "nextReviewAction" => handoff["next_review_action"],
-      "headBranch" => handoff["head_branch"],
-      "baseBranch" => handoff["base_branch"],
-      "curatedSummaryId" => handoff["curated_summary_id"],
-      "curatedSummaryPath" => handoff["curated_summary_path"],
+      "headBranch" => public_text(handoff["head_branch"]),
+      "baseBranch" => public_text(handoff["base_branch"]),
+      "curatedSummaryId" => public_text(handoff["curated_summary_id"]),
+      "curatedSummaryPath" => public_text(handoff["curated_summary_path"]),
       "evidenceIds" => handoff["evidence_ids"],
       "validationEvidence" => public_validation_evidence(handoff["validation_evidence"])
     }
@@ -537,6 +538,15 @@ defmodule SymphoniaService.TaskStore do
   defp truthy?(true), do: true
   defp truthy?("true"), do: true
   defp truthy?(_), do: false
+
+  defp public_text(value) when is_binary(value) do
+    case Redactor.sanitize_value(value) do
+      :drop -> nil
+      value -> value
+    end
+  end
+
+  defp public_text(_value), do: nil
 
   defp now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 end

@@ -156,7 +156,7 @@ defmodule SymphoniaService.Access.AuditLog do
     |> String.trim()
     |> case do
       "" -> nil
-      value -> String.slice(value, 0, 120)
+      value -> redact_string(value) |> String.slice(0, 120)
     end
   end
 
@@ -207,15 +207,10 @@ defmodule SymphoniaService.Access.AuditLog do
   end
 
   defp redact_string(value) do
-    value
-    |> String.replace(
-      ~r/(^|[\s(])\/(?:Users|private|tmp|var|Volumes|home|opt|usr)\/[^\s),]+/,
-      "\\1[local path hidden]"
-    )
-    |> String.replace(
-      ~r/\b[A-Z0-9_]*(TOKEN|SECRET|KEY|PASSWORD)=\S+/i,
-      "[environment value hidden]"
-    )
+    case Redactor.sanitize_value(value) do
+      :drop -> ""
+      value -> value
+    end
   end
 
   defp repo_key(%{"key" => key}) when is_binary(key), do: key

@@ -357,7 +357,7 @@ defmodule SymphoniaService.Runner.CloudSandboxProvider do
             "kind" => run["kind"],
             "state" => run["state"],
             "provider" => run["provider"],
-            "current_step" => run["current_step"],
+            "current_step" => SymphoniaService.CodingAssistant.RunEvents.display_step(run),
             "message" => SymphoniaService.CodingAssistant.RunEvents.public_message(run),
             "display_step" => SymphoniaService.CodingAssistant.RunEvents.display_step(run),
             "display_message" => SymphoniaService.CodingAssistant.RunEvents.display_message(run),

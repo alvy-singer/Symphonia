@@ -378,7 +378,7 @@ defmodule SymphoniaService.CodingAssistant do
       "kind" => run["kind"],
       "state" => run["state"],
       "provider" => run["provider"],
-      "current_step" => run["current_step"],
+      "current_step" => RunEvents.display_step(run),
       "message" => RunEvents.public_message(run),
       "display_step" => RunEvents.display_step(run),
       "display_message" => RunEvents.display_message(run),

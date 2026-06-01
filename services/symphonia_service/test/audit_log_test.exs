@@ -2,6 +2,7 @@ defmodule SymphoniaService.AuditLogTest do
   use ExUnit.Case
 
   alias SymphoniaService.Access.AuditLog
+  alias SymphoniaService.Privacy.Inventory
 
   setup do
     root = Path.join(System.tmp_dir!(), "symphonia-audit-#{System.unique_integer([:positive])}")
@@ -87,5 +88,31 @@ defmodule SymphoniaService.AuditLogTest do
              "githubPrUrl" => "[environment value hidden]",
              "reviewBranch" => "[local path hidden]"
            }
+  end
+
+  test "sanitizer redacts privacy leak fixtures from summaries, targets, and metadata", %{
+    registry_path: registry_path,
+    repository: repository
+  } do
+    for value <- Inventory.risky_values() do
+      event =
+        AuditLog.record(registry_path, repository, %{
+          "actor" => %{"id" => "ava", "name" => "Ava", "role" => "maintainer"},
+          "action" => "private_workspace.update",
+          "target" => %{"type" => "private_workspace", "id" => value},
+          "result" => "completed",
+          "summary" => "Audit fixture #{value}",
+          "metadata" => %{
+            "artifactId" => value,
+            "rawBody" => value,
+            "threadId" => value
+          }
+        })
+
+      encoded = JSON.encode!(event)
+      refute encoded =~ value
+      refute Map.has_key?(event["metadata"], "rawBody")
+      refute Map.has_key?(event["metadata"], "threadId")
+    end
   end
 end
